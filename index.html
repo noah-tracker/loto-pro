@@ -6,13 +6,11 @@
     <title>Analyseur Loto Pro</title>
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
-   <!-- ⭐ NOUVEAU : Firebase SDKs (à ajouter) -->
+    
+    <!-- Firebase SDKs (version compat uniquement) -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
-    <!-- Firebase (optionnel) -->
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-auth-compat.js"></script>
-    <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
+
     <style>
         :root {
             --bg: #0a0a0f; --surface: #13131c; --surface2: #1c1c28; --surface3: #252538;
@@ -114,8 +112,10 @@
     <button class="btn btn-secondary" onclick="toggleTheme()" style="font-size:12px;padding:6px 12px;">☀️/🌙</button>
     <button class="btn btn-secondary" onclick="enableNotifications()" style="font-size:12px;padding:6px 12px;">🔔</button>
     <button class="btn btn-secondary" onclick="exportAnalyses()" style="font-size:12px;padding:6px 12px;">📥</button>
-    <button id="firebaseBtn" class="btn btn-secondary" onclick="showFirebasePanel()" style="font-size:12px;padding:6px 12px;">☁️</button>
+    <button class="btn btn-secondary" onclick="sauvegarderCloud()" style="font-size:12px;padding:6px 12px;">💾 Cloud</button>
+    <button class="btn btn-secondary" onclick="chargerCloud()" style="font-size:12px;padding:6px 12px;">📥 Charger</button>
 </div>
+
 <div class="nav">
     <button class="tab active" onclick="showTab('dashboard')">📊</button>
     <button class="tab" onclick="showTab('generateur')">🎯</button>
@@ -286,30 +286,20 @@
     </div>
 </div>
 
-<!-- Firebase Panel (modal-like) -->
-<div id="firebasePanel" style="display:none; position:fixed; top:0; left:0; right:0; bottom:0; background:rgba(0,0,0,0.8); z-index:1000; align-items:center; justify-content:center;">
-    <div class="card" style="max-width:400px; margin:20px;">
-        <h3>☁️ Sauvegarde Cloud</h3>
-        <div id="firebaseStatus" style="margin:12px 0; padding:8px; background:var(--surface2); border-radius:8px; font-size:12px;">
-            ⚠️ Configuration requise
-        </div>
-        <div style="margin-bottom:12px">
-            <input type="text" id="firebaseApiKey" placeholder="API Key" style="width:100%; padding:8px; margin-bottom:8px; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text);">
-            <input type="text" id="firebaseProjectId" placeholder="Project ID" style="width:100%; padding:8px; margin-bottom:8px; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text);">
-            <input type="text" id="firebaseDbUrl" placeholder="Database URL" style="width:100%; padding:8px; margin-bottom:8px; background:var(--surface2); border:1px solid var(--border); border-radius:8px; color:var(--text);">
-        </div>
-        <button class="btn btn-primary" onclick="configFirebase()" style="width:100%; margin-bottom:8px;">🔧 Configurer</button>
-        <button class="btn btn-secondary" onclick="sauvegarderCloud()" style="width:100%; margin-bottom:8px;">💾 Sauvegarder</button>
-        <button class="btn btn-secondary" onclick="chargerCloud()" style="width:100%; margin-bottom:8px;">📥 Charger</button>
-        <button class="btn btn-secondary" onclick="document.getElementById('firebasePanel').style.display='none'" style="width:100%;">❌ Fermer</button>
-    </div>
-</div>
-
 <script>
-// ==================== CONFIGURATION ====================
-// Firebase sera configuré dynamiquement via l'interface utilisateur
-// Les données sont sauvegardées localement par défaut
+// ==================== CONFIGURATION FIREBASE ====================
+// ⚠️ REMPLACEZ PAR VOS VALEURS (depuis console.firebase.google.com)
+const FIREBASE_CONFIG = {
+    apiKey: "AIzaSyA5zH584RVWIe4KSEmHpZhfR0b2Q-OTQYc",
+    authDomain: "loto-pro-8dcfe.firebaseapp.com",
+    databaseURL: "https://loto-pro-8dcfe-default-rtdb.firebaseio.com",
+    projectId: "loto-pro-8dcfe",
+    storageBucket: "loto-pro-8dcfe.firebasestorage.app",
+    messagingSenderId: "951598791633",
+    appId: "1:951598791633:web:bc6938761378e38d61fef0"
+};
 
+// Variables globales
 let draws = [];
 let userDraws = [];
 let lastGeneratedGrille = null;
@@ -320,7 +310,28 @@ let csvTexts = [];
 // Firebase variables
 let firebaseApp = null;
 let firebaseDb = null;
-let firebaseConfigured = false;
+let firebaseReady = false;
+let userId = localStorage.getItem('loto_user_id');
+
+// Initialisation Firebase
+try {
+    if (FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !== "AIzaSyA5zH584RVWIe4KSEmHpZhfR0b2Q-OTQYc") {
+        firebase.initializeApp(FIREBASE_CONFIG);
+        firebaseDb = firebase.database();
+        firebaseReady = true;
+        console.log("✅ Firebase connecté !");
+    } else {
+        console.warn("⚠️ Firebase non configuré - utilisez vos propres clés");
+    }
+} catch(e) {
+    console.error("❌ Firebase error:", e);
+}
+
+// ID utilisateur unique
+if (!userId) {
+    userId = 'user_' + Math.random().toString(36).substr(2, 9);
+    localStorage.setItem('loto_user_id', userId);
+}
 
 // ==================== CHARGEMENT CSV ====================
 async function loadCSV() {
@@ -439,15 +450,6 @@ async function initApp() {
     }
     startApplication();
     if (localStorage.getItem('loto_theme') === 'light') document.body.classList.add('light');
-    
-    // Restaurer sauvegarde Firebase si existante
-    const fbConfig = localStorage.getItem('firebase_config');
-    if (fbConfig) {
-        try {
-            const config = JSON.parse(fbConfig);
-            initFirebase(config);
-        } catch(e) {}
-    }
 }
 
 function startApplication() {
@@ -1202,108 +1204,42 @@ function exportAnalyses() {
     a.click();
 }
 
-// ==================== FIREBASE (Optionnel - Interface Utilisateur) ====================
-function showFirebasePanel() {
-    document.getElementById('firebasePanel').style.display = 'flex';
-    const saved = localStorage.getItem('firebase_config');
-    if (saved) {
-        try {
-            const cfg = JSON.parse(saved);
-            document.getElementById('firebaseApiKey').value = cfg.apiKey || '';
-            document.getElementById('firebaseProjectId').value = cfg.projectId || '';
-            document.getElementById('firebaseDbUrl').value = cfg.databaseURL || '';
-            document.getElementById('firebaseStatus').innerHTML = '✅ Configuration existante';
-        } catch(e) {}
-    }
-}
-
-function initFirebase(config) {
-    try {
-        if (firebaseApp) {
-            // Déjà initialisé
-            firebaseDb = firebase.database();
-            firebaseConfigured = true;
-            return;
-        }
-        firebaseApp = firebase.initializeApp(config);
-        firebaseDb = firebase.database();
-        firebaseConfigured = true;
-        localStorage.setItem('firebase_config', JSON.stringify(config));
-        document.getElementById('firebaseStatus').innerHTML = '✅ Firebase connecté !';
-        showToast('Firebase configuré avec succès', 'success');
-    } catch(e) {
-        console.error(e);
-        document.getElementById('firebaseStatus').innerHTML = '❌ Erreur de configuration';
-        showToast('Erreur Firebase', 'error');
-    }
-}
-
-function configFirebase() {
-    const apiKey = document.getElementById('firebaseApiKey').value.trim();
-    const projectId = document.getElementById('firebaseProjectId').value.trim();
-    const dbUrl = document.getElementById('firebaseDbUrl').value.trim();
-    
-    if (!apiKey || !projectId || !dbUrl) {
-        showToast('Veuillez remplir tous les champs', 'error');
-        return;
-    }
-    
-    const config = {
-        apiKey: apiKey,
-        authDomain: `${projectId}.firebaseapp.com`,
-        databaseURL: dbUrl,
-        projectId: projectId,
-        storageBucket: `${projectId}.appspot.com`,
-        messagingSenderId: apiKey.split('-')[0] || '000000000000',
-        appId: `1:${apiKey.split('-')[0] || '000000000000'}:web:0000000000000000000000`
-    };
-    
-    initFirebase(config);
-}
-
+// ==================== FIREBASE CLOUD FUNCTIONS ====================
 async function sauvegarderCloud() {
-    if (!firebaseConfigured || !firebaseDb) {
-        showToast('Configurez Firebase d\'abord', 'error');
+    if (!firebaseReady || !firebaseDb) {
+        showToast('Firebase non configuré. Vérifiez vos clés.', 'error');
         return;
     }
-    
-    const userId = localStorage.getItem('loto_user_id') || 'user_' + Math.random().toString(36).substr(2, 9);
-    localStorage.setItem('loto_user_id', userId);
     
     const data = {
         userId: userId,
         favoris: favoris,
         grillesHistory: grillesHistory,
         userDraws: userDraws,
-        date: Date.now()
+        date: Date.now(),
+        version: '1.0'
     };
     
     try {
         await firebaseDb.ref(`sauvegardes/${userId}`).set(data);
         showToast('✅ Données sauvegardées dans le cloud !', 'success');
-        document.getElementById('firebaseStatus').innerHTML = '✅ Sauvegarde effectuée !';
+        console.log('Sauvegarde réussie');
     } catch(e) {
-        console.error(e);
-        showToast('❌ Erreur de sauvegarde', 'error');
-        document.getElementById('firebaseStatus').innerHTML = '❌ Erreur: ' + e.message;
+        console.error('Erreur sauvegarde:', e);
+        showToast('❌ Erreur de sauvegarde: ' + e.message, 'error');
     }
 }
 
 async function chargerCloud() {
-    if (!firebaseConfigured || !firebaseDb) {
-        showToast('Configurez Firebase d\'abord', 'error');
-        return;
-    }
-    
-    const userId = localStorage.getItem('loto_user_id');
-    if (!userId) {
-        showToast('Aucun utilisateur trouvé', 'error');
+    if (!firebaseReady || !firebaseDb) {
+        showToast('Firebase non configuré', 'error');
         return;
     }
     
     try {
         const snapshot = await firebaseDb.ref(`sauvegardes/${userId}`).once('value');
         const data = snapshot.val();
+        
         if (data) {
             if (data.favoris) favoris = data.favoris;
             if (data.grillesHistory) grillesHistory = data.grillesHistory;
@@ -1316,14 +1252,14 @@ async function chargerCloud() {
             updateAllData();
             renderDashboard();
             renderHistory();
+            
             showToast('✅ Données chargées depuis le cloud !', 'success');
-            document.getElementById('firebaseStatus').innerHTML = '✅ Chargement réussi !';
         } else {
-            showToast('Aucune sauvegarde trouvée', 'error');
+            showToast('Aucune sauvegarde trouvée', 'info');
         }
     } catch(e) {
-        console.error(e);
-        showToast('❌ Erreur de chargement', 'error');
+        console.error('Erreur chargement:', e);
+        showToast('❌ Erreur de chargement: ' + e.message, 'error');
     }
 }
 
