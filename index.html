@@ -1221,14 +1221,17 @@ function exportAnalyses() {
 }
 
 // ==================== FIREBASE CLOUD FUNCTIONS ====================
+
 async function sauvegarderCloud() {
     if (!firebaseReady || !firebaseDb) {
-        showToast('Firebase non configuré. Vérifiez vos clés.', 'error');
+        showToast('Firebase non configuré', 'error');
         return;
     }
     
+    // Utiliser un ID fixe pour tous les utilisateurs
+    const cloudKey = 'partage_universel';
+    
     const data = {
-        userId: userId,
         favoris: favoris,
         grillesHistory: grillesHistory,
         userDraws: userDraws,
@@ -1237,12 +1240,11 @@ async function sauvegarderCloud() {
     };
     
     try {
-        await firebaseDb.ref(`sauvegardes/${userId}`).set(data);
-        showToast('✅ Données sauvegardées dans le cloud !', 'success');
-        console.log('Sauvegarde réussie');
+        await firebaseDb.ref(`sauvegardes/${cloudKey}`).set(data);
+        showToast('✅ Données sauvegardées dans le cloud partagé !', 'success');
     } catch(e) {
         console.error('Erreur sauvegarde:', e);
-        showToast('❌ Erreur de sauvegarde: ' + e.message, 'error');
+        showToast('❌ Erreur: ' + e.message, 'error');
     }
 }
 
@@ -1252,8 +1254,10 @@ async function chargerCloud() {
         return;
     }
     
+    const cloudKey = 'partage_universel';
+    
     try {
-        const snapshot = await firebaseDb.ref(`sauvegardes/${userId}`).once('value');
+        const snapshot = await firebaseDb.ref(`sauvegardes/${cloudKey}`).once('value');
         const data = snapshot.val();
         
         if (data) {
@@ -1269,13 +1273,13 @@ async function chargerCloud() {
             renderDashboard();
             renderHistory();
             
-            showToast('✅ Données chargées depuis le cloud !', 'success');
+            showToast('✅ Données chargées depuis le cloud partagé !', 'success');
         } else {
-            showToast('Aucune sauvegarde trouvée', 'info');
+            showToast('Aucune sauvegarde trouvée. Sauvegardez d\'abord.', 'info');
         }
     } catch(e) {
         console.error('Erreur chargement:', e);
-        showToast('❌ Erreur de chargement: ' + e.message, 'error');
+        showToast('❌ Erreur: ' + e.message, 'error');
     }
 }
 
