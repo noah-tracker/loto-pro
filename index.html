@@ -7,7 +7,7 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     
-    <!-- Firebase SDKs (version compat uniquement) -->
+    <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
 
@@ -121,6 +121,7 @@
     <button class="tab" onclick="showTab('generateur')">🎯</button>
     <button class="tab" onclick="showTab('frequences')">📈</button>
     <button class="tab" onclick="showTab('chance')">🍀</button>
+    <button class="tab" onclick="showTab('repetitions')">🔄</button>
     <button class="tab" onclick="showTab('patterns')">🔮</button>
     <button class="tab" onclick="showTab('scores')">⭐</button>
     <button class="tab" onclick="showTab('second')">🔁</button>
@@ -213,6 +214,20 @@
         <div class="card"><h3>Numéros principaux associés au chance</h3><div id="chanceAssoc"></div></div>
     </div>
 
+    <!-- Répétitions consécutives -->
+    <div class="section" id="sec-repetitions">
+        <div class="card">
+            <h3>🔄 Analyse des répétitions entre tirages consécutifs</h3>
+            <div id="repetitionsContent">
+                <p style="color:var(--text2); text-align:center; padding:2rem;">Analyse en cours...</p>
+            </div>
+        </div>
+        <div class="card">
+            <h3>💡 Stratégie recommandée</h3>
+            <div id="strategieRepetition" style="padding: 1rem; background: var(--surface2); border-radius: 12px;"></div>
+        </div>
+    </div>
+
     <!-- Patterns -->
     <div class="section" id="sec-patterns">
         <div class="grid grid-2">
@@ -288,11 +303,10 @@
 
 <script>
 // ==================== CONFIGURATION FIREBASE ====================
-// ⚠️ REMPLACEZ PAR VOS VALEURS (depuis console.firebase.google.com)
 const FIREBASE_CONFIG = {
     apiKey: "AIzaSyA5zH584RVWIe4KSEmHpZhfR0b2Q-OTQYc",
     authDomain: "loto-pro-8dcfe.firebaseapp.com",
-    databaseURL: "https://loto-pro-8dcfe-default-rtdb.europe-west1.firebasedatabase.app",  // ← NOTEZ LA RÉGION
+    databaseURL: "https://loto-pro-8dcfe-default-rtdb.europe-west1.firebasedatabase.app",
     projectId: "loto-pro-8dcfe",
     storageBucket: "loto-pro-8dcfe.firebasestorage.app",
     messagingSenderId: "951598791633",
@@ -313,40 +327,28 @@ let firebaseDb = null;
 let firebaseReady = false;
 let userId = localStorage.getItem('loto_user_id');
 
-// ID utilisateur unique
 if (!userId) {
     userId = 'user_' + Math.random().toString(36).substr(2, 9);
     localStorage.setItem('loto_user_id', userId);
 }
 
-// Initialisation Firebase - VERSION CORRIGÉE
 try {
-    // Vérifier que la clé API existe (pas besoin de comparer avec une valeur par défaut)
     if (FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey.startsWith('AIza')) {
-        // Réinitialiser si déjà initialisé
         if (firebase.apps.length) {
             firebase.apps.forEach(app => app.delete());
         }
         firebase.initializeApp(FIREBASE_CONFIG);
         firebaseDb = firebase.database();
         firebaseReady = true;
-        console.log("✅ Firebase connecté avec succès !");
-        console.log("📁 Database URL:", FIREBASE_CONFIG.databaseURL);
-        
-        // Tester la connexion
+        console.log("✅ Firebase connecté");
         firebaseDb.ref('.info/connected').on('value', (snap) => {
-            if (snap.val() === true) {
-                console.log("📡 Connecté à Firebase Realtime Database");
-                showToast('☁️ Cloud connecté', 'success');
-            }
+            if (snap.val() === true) console.log("📡 Connecté à Firebase");
         });
     } else {
-        console.warn("⚠️ Firebase non configuré - clé API manquante ou invalide");
-        showToast('⚠️ Firebase non configuré', 'error');
+        console.warn("⚠️ Firebase non configuré");
     }
 } catch(e) {
     console.error("❌ Firebase error:", e);
-    showToast('❌ Erreur Firebase: ' + e.message, 'error');
 }
 
 // ==================== CHARGEMENT CSV ====================
@@ -444,7 +446,7 @@ function updateAllData() {
     const allDraws = [...draws];
     userDraws.forEach(ud => {
         if (!allDraws.find(d => formatDate(d.date) === ud.date)) {
-            allDraws.push({ date: new Date(ud.date), jour: '', boules: ud.balls, chance: ud.chance, nb_gagnants_rang1:0, rapport_rang1:0, second_boules:[], codes:[], special:'', isUser:true });
+            allDraws.push({ date: new Date(ud.date), jour: '', boules: ud.balls, chance: ud.chance, nb_gagnants_rang1:0, rapport_rang1:0, second_boules:[], codes:[], special:'', isUser: true });
         }
     });
     allDraws.sort((a,b)=> b.date - a.date);
@@ -576,6 +578,10 @@ function showTab(id) {
     if (id==='dashboard') renderDashboard();
     if (id==='frequences') updateFreqPeriod();
     if (id==='chance') renderChance();
+    if (id==='repetitions') {
+        document.getElementById('repetitionsContent').innerHTML = afficherAnalyseRepetitions();
+        genererStrategieRepetition();
+    }
     if (id==='patterns') renderPatterns();
     if (id==='scores') renderScores();
     if (id==='second') updateSecondPeriod();
@@ -622,7 +628,6 @@ function renderJackpotChart() {
     if (window.jackpotChartInstance) window.jackpotChartInstance.destroy();
     window.jackpotChartInstance = new Chart(ctx, { type: 'line', data: { labels: recent.map(d=>formatDate(d.date)), datasets: [{label:'Rapport Rang1 (€)',data:recent.map(d=>d.rapport_rang1||0),borderColor:'#f4c430',tension:0.3}] }, options: { responsive:true, maintainAspectRatio:false, plugins:{zoom:{zoom:{wheel:{enabled:true}, drag:{enabled:true}}}} } });
 }
-
 // ==================== GÉNÉRATEUR ====================
 function getParams() { return {
     sumMin:+document.getElementById('sumMin').value, sumMax:+document.getElementById('sumMax').value,
@@ -767,6 +772,178 @@ function appliquerProfil(p) {
 function upd(id,spanId){document.getElementById(spanId).textContent=document.getElementById(id).value}
 function updF(id,spanId){document.getElementById(spanId).textContent='×'+parseFloat(document.getElementById(id).value).toFixed(1)}
 
+// ==================== ANALYSE RÉPÉTITIONS CONSÉCUTIVES ====================
+function analyserRepetitionsConsecutives() {
+    if (draws.length < 2) return null;
+    
+    let totalComparaisons = 0;
+    let repetitions = 0;
+    let repetitionsParNumero = {};
+    let repetitionsChance = 0;
+    let totalChanceComparaisons = 0;
+    let serieSansRepetition = 0;
+    let maxSerieSansRepetition = 0;
+    let series = [];
+    let distribution = {0:0,1:0,2:0,3:0,4:0,5:0};
+    
+    for (let i = 0; i < draws.length - 1; i++) {
+        const tirageActuel = draws[i];
+        const tirageSuivant = draws[i + 1];
+        
+        const repetes = tirageActuel.boules.filter(b => tirageSuivant.boules.includes(b));
+        const nbRepetitions = repetes.length;
+        distribution[nbRepetitions]++;
+        
+        if (nbRepetitions > 0) {
+            repetitions++;
+            repetes.forEach(num => {
+                repetitionsParNumero[num] = (repetitionsParNumero[num] || 0) + 1;
+            });
+            if (serieSansRepetition > 0) {
+                series.push(serieSansRepetition);
+                serieSansRepetition = 0;
+            }
+        } else {
+            serieSansRepetition++;
+            if (serieSansRepetition > maxSerieSansRepetition) {
+                maxSerieSansRepetition = serieSansRepetition;
+            }
+        }
+        totalComparaisons++;
+        
+        if (tirageActuel.chance === tirageSuivant.chance) {
+            repetitionsChance++;
+        }
+        totalChanceComparaisons++;
+    }
+    
+    if (serieSansRepetition > 0) series.push(serieSansRepetition);
+    
+    const tauxGlobal = (repetitions / totalComparaisons * 100).toFixed(1);
+    const tauxTheorique = 38.7;
+    const ecartTheorique = (tauxGlobal - tauxTheorique).toFixed(1);
+    const tendance = ecartTheorique > 2 ? 'HAUTE' : (ecartTheorique < -2 ? 'BASSE' : 'NORMALE');
+    
+    let sommeRepetitions = 0;
+    for (let i = 0; i < draws.length - 1; i++) {
+        sommeRepetitions += draws[i].boules.filter(b => draws[i+1].boules.includes(b)).length;
+    }
+    const moyenneRepetitions = (sommeRepetitions / (draws.length - 1)).toFixed(2);
+    
+    const topRepetitions = Object.entries(repetitionsParNumero)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 10);
+    
+    return {
+        totalComparaisons, repetitions, tauxGlobal, tauxTheorique, ecartTheorique, tendance,
+        moyenneRepetitions, distribution, repetitionsChance,
+        tauxChance: (repetitionsChance / totalChanceComparaisons * 100).toFixed(1),
+        topRepetitions, maxSerieSansRepetition, series, derniereSerie: serieSansRepetition
+    };
+}
+
+function afficherAnalyseRepetitions() {
+    const stats = analyserRepetitionsConsecutives();
+    if (!stats) return '<p style="color:var(--text3)">Pas assez de tirages pour analyser (minimum 2)</p>';
+    
+    const couleurTendance = stats.tendance === 'HAUTE' ? 'var(--red)' : (stats.tendance === 'BASSE' ? 'var(--green)' : 'var(--gold)');
+    const interpretation = stats.tendance === 'HAUTE' ? 
+        '🔥 Les numéros se répètent PLUS souvent que la normale. Favorisez les numéros du dernier tirage !' :
+        (stats.tendance === 'BASSE' ?
+        '❄️ Les numéros se répètent MOINS souvent que la normale. Évitez les numéros du dernier tirage !' :
+        '📊 Les répétitions sont dans la norme statistique.');
+    
+    return `
+        <div style="display: grid; gap: 1rem;">
+            <div style="background: var(--surface2); border-radius: 16px; padding: 1rem; text-align: center;">
+                <div style="font-size: 11px; color: var(--text2); text-transform: uppercase;">Taux de répétition</div>
+                <div style="font-size: 36px; font-weight: 700; color: ${couleurTendance};">${stats.tauxGlobal}%</div>
+                <div style="font-size: 12px; color: var(--text2);">Théorique: ${stats.tauxTheorique}% (écart: ${stats.ecartTheorique > 0 ? '+' : ''}${stats.ecartTheorique}%)</div>
+                <div style="margin-top: 8px; font-size: 13px; color: var(--text); background: var(--surface); border-radius: 8px; padding: 6px; display: inline-block;">${interpretation}</div>
+            </div>
+            
+            <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px;">
+                <div style="background: var(--surface2); border-radius: 12px; padding: 8px; text-align: center;">
+                    <div style="font-size: 10px; color: var(--text2);">Répétitions moy.</div>
+                    <div style="font-size: 20px; font-weight: 700;">${stats.moyenneRepetitions}</div>
+                    <div style="font-size: 10px; color: var(--text2);">par tirage</div>
+                </div>
+                <div style="background: var(--surface2); border-radius: 12px; padding: 8px; text-align: center;">
+                    <div style="font-size: 10px; color: var(--text2);">Max sans répét.</div>
+                    <div style="font-size: 20px; font-weight: 700;">${stats.maxSerieSansRepetition}</div>
+                    <div style="font-size: 10px; color: var(--text2);">tirages</div>
+                </div>
+                <div style="background: var(--surface2); border-radius: 12px; padding: 8px; text-align: center;">
+                    <div style="font-size: 10px; color: var(--text2);">Chance répété</div>
+                    <div style="font-size: 20px; font-weight: 700;">${stats.tauxChance}%</div>
+                    <div style="font-size: 10px; color: var(--text2);">(théo: 10%)</div>
+                </div>
+            </div>
+            
+            <div style="background: var(--surface2); border-radius: 12px; padding: 1rem;">
+                <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">Distribution du nombre de répétitions</div>
+                <div style="display: flex; gap: 8px; justify-content: space-around;">
+                    ${[0,1,2,3,4,5].map(n => `<div style="text-align: center;"><div style="font-size: 18px; font-weight: 700;">${stats.distribution[n] || 0}</div><div style="font-size: 10px; color: var(--text2);">${n} répét.</div></div>`).join('')}
+                </div>
+            </div>
+            
+            <div style="background: var(--surface2); border-radius: 12px; padding: 1rem;">
+                <div style="font-size: 12px; font-weight: 600; margin-bottom: 8px;">🎯 Numéros qui se répètent le plus souvent</div>
+                <div class="balls-row">
+                    ${stats.topRepetitions.map(([num, count]) => `<div style="text-align: center;"><div class="ball ${getDizaineColor(parseInt(num))} ball-sm">${num}</div><div style="font-size: 9px; color: var(--text2);">${count}x</div></div>`).join('')}
+                </div>
+            </div>
+            
+            <div style="background: var(--surface2); border-radius: 12px; padding: 1rem;">
+                <div style="font-size: 12px; font-weight: 600; margin-bottom: 4px;">📈 Dernière série en cours</div>
+                <div style="font-size: 24px; font-weight: 700;">${stats.derniereSerie}</div>
+                <div style="font-size: 11px; color: var(--text2);">tirages consécutifs sans répétition</div>
+                ${stats.derniereSerie >= 5 ? '<div style="margin-top: 8px; font-size: 11px; color: var(--red);">⚠️ Probabilité de répétition en hausse !</div>' : ''}
+            </div>
+        </div>
+    `;
+}
+
+function genererStrategieRepetition() {
+    const stats = analyserRepetitionsConsecutives();
+    if (!stats) {
+        document.getElementById('strategieRepetition').innerHTML = '<p>Pas assez de données</p>';
+        return;
+    }
+    
+    const dernierTirage = draws[0];
+    const numerosDernierTirage = dernierTirage.boules;
+    const chanceDernierTirage = dernierTirage.chance;
+    
+    let strategie = '', conseilNumeros = '', conseilChance = '';
+    
+    if (stats.tendance === 'HAUTE') {
+        strategie = '📈 La tendance actuelle favorise les RÉPÉTITIONS.';
+        conseilNumeros = `✅ Sélectionnez 1 à 2 numéros du dernier tirage : ${numerosDernierTirage.join(', ')}`;
+        conseilChance = `✅ Le numéro chance se répète dans ${stats.tauxChance}% des cas. Pensez à garder le même (${chanceDernierTirage})`;
+    } else if (stats.tendance === 'BASSE') {
+        strategie = '📉 La tendance actuelle ÉVITE les répétitions.';
+        conseilNumeros = `❌ Évitez les numéros du dernier tirage : ${numerosDernierTirage.join(', ')}`;
+        conseilChance = `❌ Le numéro chance se répète moins souvent. Changez-le (actuel: ${chanceDernierTirage})`;
+    } else {
+        strategie = '⚖️ La tendance est NEUTRE. Aucune influence particulière.';
+        conseilNumeros = `ℹ️ Le taux de répétition (${stats.tauxGlobal}%) est proche de la moyenne (${stats.tauxTheorique}%)`;
+        conseilChance = `ℹ️ Le numéro chance se répète ${stats.tauxChance}% du temps (moyenne: 10%)`;
+    }
+    
+    let alerteSerie = '';
+    if (stats.derniereSerie >= 5) {
+        alerteSerie = `<div style="margin-top: 12px; padding: 8px; background: rgba(255,82,82,0.15); border-radius: 8px; border-left: 3px solid var(--red);">⚠️ Série sans répétition : ${stats.derniereSerie} tirages<br>Historiquement, après ${stats.derniereSerie} tirages sans répétition, la probabilité augmente. ${stats.tendance !== 'BASSE' ? 'Parier sur une répétition est statistiquement avantageux.' : ''}</div>`;
+    }
+    
+    document.getElementById('strategieRepetition').innerHTML = `
+        <div style="margin-bottom: 12px;"><span style="background: var(--surface); padding: 4px 8px; border-radius: 100px; font-size: 11px;">Basé sur ${stats.totalComparaisons} comparaisons</span></div>
+        <div style="font-size: 14px; margin-bottom: 12px;">${strategie}</div>
+        <div style="font-size: 13px; margin-bottom: 8px;">${conseilNumeros}</div>
+        <div style="font-size: 13px; margin-bottom: 8px;">${conseilChance}</div>${alerteSerie}
+    `;
+}
+
 // ==================== POPULARITÉ & SCORES ====================
 function getPopularityIndex() {
     const pop = {}; for (let i = 1; i <= 49; i++) pop[i] = 0;
@@ -777,9 +954,7 @@ function getPopularityIndex() {
             d.boules.forEach(b => { pop[b] += facteur; count[b]++; });
         }
     });
-    for (let i = 1; i <= 49; i++) {
-        if (count[i] > 0) pop[i] = pop[i] / count[i];
-    }
+    for (let i = 1; i <= 49; i++) if (count[i] > 0) pop[i] = pop[i] / count[i];
     const maxPop = Math.max(...Object.values(pop));
     for (let i = 1; i <= 49; i++) pop[i] = maxPop > 0 ? pop[i] / maxPop : 0;
     return pop;
@@ -859,16 +1034,10 @@ function renderScores() {
     const ctx = document.getElementById('scoreChart')?.getContext('2d');
     if (ctx) {
         if (window.scoreChartInstance) window.scoreChartInstance.destroy();
-        window.scoreChartInstance = new Chart(ctx, {
-            type: 'bar',
-            data: { labels, datasets: [{ label: 'Score composite', data, backgroundColor: data.map(v => v > 70 ? '#ff5252' : v > 40 ? '#f4c430' : '#4a9eff') }] },
-            options: { responsive: true, maintainAspectRatio: false, scales: { y: { max: 100 } } }
-        });
+        window.scoreChartInstance = new Chart(ctx, { type: 'bar', data: { labels, datasets: [{ label: 'Score composite', data, backgroundColor: data.map(v => v > 70 ? '#ff5252' : v > 40 ? '#f4c430' : '#4a9eff') }] }, options: { responsive: true, maintainAspectRatio: false, scales: { y: { max: 100 } } } });
     }
     const sorted = Object.entries(scores).sort((a, b) => b[1] - a[1]);
-    document.getElementById('scoreTopFlop').innerHTML = `
-        <div><h4 style="color:var(--text2)">Top 10</h4>${sorted.slice(0, 10).map(([n, v]) => `<div>N°${n} : ${v}</div>`).join('')}</div>
-        <div><h4 style="color:var(--text2)">Flop 10</h4>${sorted.slice(-10).reverse().map(([n, v]) => `<div>N°${n} : ${v}</div>`).join('')}</div>`;
+    document.getElementById('scoreTopFlop').innerHTML = `<div><h4 style="color:var(--text2)">Top 10</h4>${sorted.slice(0, 10).map(([n, v]) => `<div>N°${n} : ${v}</div>`).join('')}</div><div><h4 style="color:var(--text2)">Flop 10</h4>${sorted.slice(-10).reverse().map(([n, v]) => `<div>N°${n} : ${v}</div>`).join('')}</div>`;
 }
 
 // ==================== CHANCE ====================
@@ -878,11 +1047,7 @@ function renderChance() {
     const ctx = document.getElementById('chanceFreqChart')?.getContext('2d');
     if (ctx) {
         if (window.chanceFreqChartInstance) window.chanceFreqChartInstance.destroy();
-        window.chanceFreqChartInstance = new Chart(ctx, {
-            type: 'bar',
-            data: { labels: Array.from({ length: 10 }, (_, i) => i + 1), datasets: [{ label: 'Apparitions', data: Object.values(freqChance), backgroundColor: '#3ecf8e' }] },
-            options: { responsive: true, maintainAspectRatio: false }
-        });
+        window.chanceFreqChartInstance = new Chart(ctx, { type: 'bar', data: { labels: Array.from({ length: 10 }, (_, i) => i + 1), datasets: [{ label: 'Apparitions', data: Object.values(freqChance), backgroundColor: '#3ecf8e' }] }, options: { responsive: true, maintainAspectRatio: false } });
     }
     const gapsChance = [];
     for (let i = 1; i <= 10; i++) {
@@ -892,7 +1057,6 @@ function renderChance() {
     }
     gapsChance.sort((a, b) => (b.last === null ? -1 : b.last) - (a.last === null ? -1 : a.last));
     document.getElementById('chanceGaps').innerHTML = gapsChance.map(g => `<div>N°${g.n} : ${g.last === null ? 'jamais sorti' : 'il y a ' + g.last + ' tirages'}</div>`).join('');
-
     const assoc = {};
     draws.forEach(d => { d.boules.forEach(b => { const key = b + '-' + d.chance; assoc[key] = (assoc[key] || 0) + 1; }); });
     const topAssoc = Object.entries(assoc).sort((a, b) => b[1] - a[1]).slice(0, 20);
@@ -911,11 +1075,9 @@ function renderPatterns() {
         }
     });
     document.getElementById('suitesArith').innerHTML = suites.slice(0, 20).map(o => `<div>${o.date} : ${o.nums.join('-')} (écart ${o.ecart})</div>`).join('') || '<p style="color:var(--text3)">Aucune suite arithmétique détectée</p>';
-
     const term = {};
     draws.forEach(d => { d.boules.forEach(b => { const t = b % 10; term[t] = (term[t] || 0) + 1; }); });
     document.getElementById('terminaisons').innerHTML = Object.entries(term).sort((a, b) => b[1] - a[1]).map(([t, c]) => `<div>Terminaison ${t} : ${c} fois</div>`).join('');
-
     const miroirs = {};
     draws.forEach(d => {
         for (let i = 0; i < d.boules.length; i++) {
@@ -958,7 +1120,6 @@ function renderSecondTirage(period = 'all') {
     }
     gaps.sort((a, b) => (b.last === null ? -1 : b.last) - (a.last === null ? -1 : a.last));
     document.getElementById('secondGaps').innerHTML = '<table style="width:100%;font-size:13px;color:var(--text2)">' + gaps.map(g => `<td><td>Numéro ${g.n}</td><td>${g.last === null ? 'jamais sorti' : 'il y a ' + g.last + ' tirages'}</td></tr>`).join('') + '</table>';
-
     const pairsCount = {};
     secDraws.forEach(d => {
         for (let i = 0; i < d.second_boules.length; i++)
@@ -969,7 +1130,6 @@ function renderSecondTirage(period = 'all') {
     });
     const pairsSorted = Object.entries(pairsCount).sort((a, b) => b[1] - a[1]).slice(0, 15);
     document.getElementById('secondPairs').innerHTML = pairsSorted.map(([k, v]) => `<div>${k} : ${v} fois</div>`).join('');
-
     const recentDraws = secDraws.slice(0, 100).reverse();
     const mainSums = recentDraws.map(d => d.boules.reduce((a, b) => a + b, 0));
     const secondSums = recentDraws.map(d => d.second_boules.reduce((a, b) => a + b, 0));
@@ -994,7 +1154,7 @@ function comparerPeriodes() {
     let html = '<h4>Comparaison fréquences</h4><table style="font-size:12px;color:var(--text2);width:100%"><tr><th>N°</th><th>Période 1</th><th>Période 2</th><th>Diff</th></tr>';
     for (let i = 1; i <= 49; i++) {
         const diff = f2[i] - f1[i];
-        html += `<tr><td>${i}</td><td>${f1[i]}</td><td>${f2[i]}</td><td style="color:${diff > 0 ? 'var(--green)' : diff < 0 ? 'var(--red)' : 'var(--text3)'}">${diff > 0 ? '+' + diff : diff}</td></tr>`;
+        html += `<tr><td>${i}</td><td>${f1[i]}</td><td>${f2[i]}</td><td style="color:${diff > 0 ? 'var(--green)' : diff < 0 ? 'var(--red)' : 'var(--text3)'}">${diff > 0 ? '+' + diff : diff}</tr></tr>`;
     }
     html += '</table>';
     document.getElementById('compResults').innerHTML = html;
@@ -1007,14 +1167,7 @@ function renderHistorique() {
     let filtered = draws;
     if (start) filtered = filtered.filter(d => d.date >= start);
     if (end) filtered = filtered.filter(d => d.date <= end);
-    document.getElementById('historiqueList').innerHTML = filtered.map(d => `
-        <div class="tirage-row">
-            <span class="tirage-date">${formatDate(d.date)}</span>
-            <div class="balls-row">${renderBalls(d.boules)}<span>+</span><div class="ball ball-chance ball-sm">${d.chance}</div></div>
-            <span class="score-badge score-mid">Σ ${d.boules.reduce((a, b) => a + b, 0)}</span>
-            ${hasConsecutive(d.boules) ? '<span class="cons-badge">consécutifs</span>' : ''}
-            ${d.second_boules && d.second_boules.length ? `<span style="font-size:11px;color:var(--text3)">2nd: ${d.second_boules.join('-')}</span>` : ''}
-        </div>`).join('');
+    document.getElementById('historiqueList').innerHTML = filtered.map(d => `<div class="tirage-row"><span class="tirage-date">${formatDate(d.date)}</span><div class="balls-row">${renderBalls(d.boules)}<span>+</span><div class="ball ball-chance ball-sm">${d.chance}</div></div><span class="score-badge score-mid">Σ ${d.boules.reduce((a, b) => a + b, 0)}</span>${hasConsecutive(d.boules) ? '<span class="cons-badge">consécutifs</span>' : ''}${d.second_boules && d.second_boules.length ? `<span style="font-size:11px;color:var(--text3)">2nd: ${d.second_boules.join('-')}</span>` : ''}</div>`).join('');
 }
 function resetHistorique() { document.getElementById('histStart').value = ''; document.getElementById('histEnd').value = ''; renderHistorique(); }
 
@@ -1023,10 +1176,7 @@ function verifierTirage() {
     const numsStr = document.getElementById('verifNums').value.trim();
     const chance = parseInt(document.getElementById('verifChance').value);
     const nums = numsStr.split(/[\s,;]+/).map(Number).filter(n => n >= 1 && n <= 49);
-    if (nums.length !== 5 || isNaN(chance) || chance < 1 || chance > 10) {
-        alert('Veuillez entrer exactement 5 numéros (1-49) et un numéro chance (1-10).');
-        return;
-    }
+    if (nums.length !== 5 || isNaN(chance) || chance < 1 || chance > 10) { alert('Veuillez entrer exactement 5 numéros (1-49) et un numéro chance (1-10).'); return; }
     const sortedNums = [...nums].sort((a, b) => a - b);
     const card = document.getElementById('verifResult'); card.style.display = 'block';
     const principalExact = draws.filter(d => d.boules.every((b, i) => b === sortedNums[i]) && d.chance === chance);
@@ -1035,31 +1185,16 @@ function verifierTirage() {
     const principal3Chance = draws.filter(d => { const hits = d.boules.filter(b => sortedNums.includes(b)).length; return hits === 3 && d.chance === chance; });
     const second4 = draws.filter(d => d.second_boules && d.second_boules.length === 5 && d.second_boules.filter(b => sortedNums.includes(b)).length === 4);
     const second3 = draws.filter(d => d.second_boules && d.second_boules.length === 5 && d.second_boules.filter(b => sortedNums.includes(b)).length === 3);
-
     let html = '';
     if (principalExact.length > 0 || secondExact.length > 0) {
         html += '<h4 style="color:var(--red)">✅ Correspondance exacte</h4>';
         if (principalExact.length > 0) html += '<p>Principal :</p>' + principalExact.map(d => `<div class="tirage-row"><span class="tirage-date">${formatDate(d.date)}</span><div class="balls-row">${renderBalls(d.boules)}<span>+</span><div class="ball ball-chance ball-sm">${d.chance}</div></div></div>`).join('');
         if (secondExact.length > 0) html += '<p>Second tirage :</p>' + secondExact.map(d => `<div class="tirage-row"><span class="tirage-date">${formatDate(d.date)}</span><div class="balls-row">${renderBalls(d.second_boules)}</div></div>`).join('');
-    } else {
-        html += '<p style="color:var(--green)">Aucune correspondance exacte trouvée.</p>';
-    }
-    if (principal4Chance.length > 0) {
-        html += '<h4 style="color:var(--orange);margin-top:1rem">⚠️ 4 numéros + chance (principal)</h4>';
-        html += principal4Chance.slice(0, 5).map(d => `<div class="tirage-row"><span class="tirage-date">${formatDate(d.date)}</span><div class="balls-row">${d.boules.map(b => `<div class="ball ball-sm ${sortedNums.includes(b) ? 'ball-generated' : getDizaineColor(b)}">${b}</div>`).join('')}<span>+</span><div class="ball ball-chance ball-sm">${d.chance}</div></div></div>`).join('');
-    }
-    if (second4.length > 0) {
-        html += '<h4 style="color:var(--orange);margin-top:1rem">⚠️ 4 numéros (second)</h4>';
-        html += second4.slice(0, 5).map(d => `<div class="tirage-row"><span class="tirage-date">${formatDate(d.date)}</span><div class="balls-row">${d.second_boules.map(b => `<div class="ball ball-sm ${sortedNums.includes(b) ? 'ball-generated' : getDizaineColor(b)}">${b}</div>`).join('')}</div></div>`).join('');
-    }
-    if (principal3Chance.length > 0) {
-        html += '<h4 style="color:var(--blue);margin-top:1rem">3 numéros + chance (principal) — 5 premiers</h4>';
-        html += principal3Chance.slice(0, 5).map(d => `<div class="tirage-row"><span class="tirage-date">${formatDate(d.date)}</span><div class="balls-row">${d.boules.map(b => `<div class="ball ball-sm ${sortedNums.includes(b) ? 'ball-generated' : getDizaineColor(b)}">${b}</div>`).join('')}<span>+</span><div class="ball ball-chance ball-sm">${d.chance}</div></div></div>`).join('');
-    }
-    if (second3.length > 0) {
-        html += '<h4 style="color:var(--blue);margin-top:1rem">3 numéros (second) — 5 premiers</h4>';
-        html += second3.slice(0, 5).map(d => `<div class="tirage-row"><span class="tirage-date">${formatDate(d.date)}</span><div class="balls-row">${d.second_boules.map(b => `<div class="ball ball-sm ${sortedNums.includes(b) ? 'ball-generated' : getDizaineColor(b)}">${b}</div>`).join('')}</div></div>`).join('');
-    }
+    } else { html += '<p style="color:var(--green)">Aucune correspondance exacte trouvée.</p>'; }
+    if (principal4Chance.length > 0) { html += '<h4 style="color:var(--orange);margin-top:1rem">⚠️ 4 numéros + chance (principal)</h4>' + principal4Chance.slice(0, 5).map(d => `<div class="tirage-row"><span class="tirage-date">${formatDate(d.date)}</span><div class="balls-row">${d.boules.map(b => `<div class="ball ball-sm ${sortedNums.includes(b) ? 'ball-generated' : getDizaineColor(b)}">${b}</div>`).join('')}<span>+</span><div class="ball ball-chance ball-sm">${d.chance}</div></div></div>`).join(''); }
+    if (second4.length > 0) { html += '<h4 style="color:var(--orange);margin-top:1rem">⚠️ 4 numéros (second)</h4>' + second4.slice(0, 5).map(d => `<div class="tirage-row"><span class="tirage-date">${formatDate(d.date)}</span><div class="balls-row">${d.second_boules.map(b => `<div class="ball ball-sm ${sortedNums.includes(b) ? 'ball-generated' : getDizaineColor(b)}">${b}</div>`).join('')}</div></div>`).join(''); }
+    if (principal3Chance.length > 0) { html += '<h4 style="color:var(--blue);margin-top:1rem">3 numéros + chance (principal) — 5 premiers</h4>' + principal3Chance.slice(0, 5).map(d => `<div class="tirage-row"><span class="tirage-date">${formatDate(d.date)}</span><div class="balls-row">${d.boules.map(b => `<div class="ball ball-sm ${sortedNums.includes(b) ? 'ball-generated' : getDizaineColor(b)}">${b}</div>`).join('')}<span>+</span><div class="ball ball-chance ball-sm">${d.chance}</div></div></div>`).join(''); }
+    if (second3.length > 0) { html += '<h4 style="color:var(--blue);margin-top:1rem">3 numéros (second) — 5 premiers</h4>' + second3.slice(0, 5).map(d => `<div class="tirage-row"><span class="tirage-date">${formatDate(d.date)}</span><div class="balls-row">${d.second_boules.map(b => `<div class="ball ball-sm ${sortedNums.includes(b) ? 'ball-generated' : getDizaineColor(b)}">${b}</div>`).join('')}</div></div>`).join(''); }
     if (html === '') html = '<p style="color:var(--text2)">Aucune correspondance partielle trouvée.</p>';
     document.getElementById('verifContent').innerHTML = html;
 }
@@ -1096,10 +1231,7 @@ function toggleNum(n) {
 function toggleChance(n) {
     saisieChance = saisieChance === n ? null : n;
     document.querySelectorAll('.chance-ball').forEach(el => el.classList.remove('picked'));
-    if (saisieChance) {
-        const pickedEl = document.getElementById(`chanceball-${saisieChance}`);
-        if (pickedEl) pickedEl.classList.add('picked');
-    }
+    if (saisieChance) { const pickedEl = document.getElementById(`chanceball-${saisieChance}`); if (pickedEl) pickedEl.classList.add('picked'); }
 }
 function updateSaisieUI() {
     const sel = document.getElementById('saisieSelected');
@@ -1107,25 +1239,16 @@ function updateSaisieUI() {
     else sel.innerHTML = [...saisieNums].sort((a, b) => a - b).map(n => `<div class="ball ball-generated ball-sm" onclick="toggleNum(${n})" title="Retirer">${n}</div>`).join('');
     for (let n = 1; n <= 49; n++) {
         const el = document.getElementById(`selball-${n}`);
-        if (el) {
-            el.classList.toggle('picked', saisieNums.includes(n));
-            el.classList.toggle('disabled', saisieNums.length >= 5 && !saisieNums.includes(n));
-        }
+        if (el) { el.classList.toggle('picked', saisieNums.includes(n)); el.classList.toggle('disabled', saisieNums.length >= 5 && !saisieNums.includes(n)); }
     }
 }
 function validerSaisie() {
     const msg = document.getElementById('saisieMsg');
     const date = document.getElementById('saisieDate').value;
-    if (!date || saisieNums.length !== 5 || !saisieChance) {
-        msg.innerHTML = '<span style="color:var(--red)">Veuillez remplir tous les champs.</span>'; return;
-    }
+    if (!date || saisieNums.length !== 5 || !saisieChance) { msg.innerHTML = '<span style="color:var(--red)">Veuillez remplir tous les champs.</span>'; return; }
     userDraws.push({ date, balls: [...saisieNums].sort((a, b) => a - b), chance: saisieChance });
     localStorage.setItem('loto_user_draws', JSON.stringify(userDraws));
-    draws.unshift({
-        date: new Date(date), jour: '', boules: [...saisieNums].sort((a, b) => a - b),
-        chance: saisieChance, nb_gagnants_rang1: 0, rapport_rang1: 0,
-        second_boules: [], codes: [], special: '', isUser: true
-    });
+    draws.unshift({ date: new Date(date), jour: '', boules: [...saisieNums].sort((a, b) => a - b), chance: saisieChance, nb_gagnants_rang1: 0, rapport_rang1: 0, second_boules: [], codes: [], special: '', isUser: true });
     document.getElementById('nbTirages').textContent = draws.length;
     msg.innerHTML = '<span style="color:var(--green)">Tirage ajouté avec succès !</span>';
     saisieNums = []; saisieChance = null; updateSaisieUI();
@@ -1145,12 +1268,7 @@ function renderParJour() {
         }
     });
     const cards = document.getElementById('parjourCards');
-    cards.innerHTML = Object.entries(jours).filter(([j, list]) => list.length > 0).map(([jour, list]) => {
-        const sommes = list.map(d => d.boules.reduce((a, b) => a + b, 0));
-        const avg = sommes.length ? (sommes.reduce((a, b) => a + b, 0) / sommes.length).toFixed(1) : '-';
-        return `<div class="metric"><label>${jour}</label><div class="val">${list.length} tirages</div><div class="sub">Somme moy: ${avg}</div></div>`;
-    }).join('');
-
+    cards.innerHTML = Object.entries(jours).filter(([j, list]) => list.length > 0).map(([jour, list]) => { const sommes = list.map(d => d.boules.reduce((a, b) => a + b, 0)); const avg = sommes.length ? (sommes.reduce((a, b) => a + b, 0) / sommes.length).toFixed(1) : '-'; return `<div class="metric"><label>${jour}</label><div class="val">${list.length} tirages</div><div class="sub">Somme moy: ${avg}</div></div>`; }).join('');
     const joursForChart = Object.keys(jours).filter(j => jours[j].length > 0);
     const ctx = document.getElementById('parjourFreqChart')?.getContext('2d');
     if (ctx && joursForChart.length > 0) {
@@ -1179,12 +1297,7 @@ function toggleTheme() {
 
 function enableNotifications() {
     if (!("Notification" in window)) return alert("Notifications non supportées.");
-    Notification.requestPermission().then(perm => {
-        if (perm === "granted") {
-            alert("Notifications activées. Vous serez prévenu à 19h les jours de tirage.");
-            scheduleNextNotification();
-        }
-    });
+    Notification.requestPermission().then(perm => { if (perm === "granted") { alert("Notifications activées. Vous serez prévenu à 19h les jours de tirage."); scheduleNextNotification(); } });
 }
 
 function scheduleNextNotification() {
@@ -1195,11 +1308,7 @@ function scheduleNextNotification() {
         const day = d.getDay();
         if (day === 1 || day === 3 || day === 6) {
             d.setHours(19, 0, 0);
-            if (d > now) {
-                setTimeout(() => {
-                    new Notification("Loto ce soir !", { body: "Pensez à jouer avant 20h30." });
-                }, d - now);
-            }
+            if (d > now) { setTimeout(() => { new Notification("Loto ce soir !", { body: "Pensez à jouer avant 20h30." }); }, d - now); }
         }
     }
 }
@@ -1210,9 +1319,7 @@ function exportAnalyses() {
     const f = getFreqsForDraws(draws);
     const pop = getPopularityIndex();
     let csv = 'Numéro,Score,Fréquence,Popularité (%)\n';
-    for (let i = 1; i <= 49; i++) {
-        csv += `${i},${scores[i]},${f[i]},${(pop[i]*100).toFixed(2)}\n`;
-    }
+    for (let i = 1; i <= 49; i++) csv += `${i},${scores[i]},${f[i]},${(pop[i]*100).toFixed(2)}\n`;
     const blob = new Blob([csv], { type: 'text/csv' });
     const a = document.createElement('a');
     a.href = URL.createObjectURL(blob);
@@ -1221,88 +1328,38 @@ function exportAnalyses() {
 }
 
 // ==================== FIREBASE CLOUD FUNCTIONS ====================
-
 async function sauvegarderCloud() {
-    if (!firebaseReady || !firebaseDb) {
-        showToast('Firebase non configuré', 'error');
-        return;
-    }
-    
-    // Utiliser un ID fixe pour tous les utilisateurs
-    const cloudKey = 'partage_universel';
-    
-    const data = {
-        favoris: favoris,
-        grillesHistory: grillesHistory,
-        userDraws: userDraws,
-        date: Date.now(),
-        version: '1.0'
-    };
-    
+    if (!firebaseReady || !firebaseDb) { showToast('Firebase non configuré', 'error'); return; }
+    const data = { userId, favoris, grillesHistory, userDraws, date: Date.now(), version: '1.0' };
     try {
-        await firebaseDb.ref(`sauvegardes/${cloudKey}`).set(data);
-        showToast('✅ Données sauvegardées dans le cloud partagé !', 'success');
-    } catch(e) {
-        console.error('Erreur sauvegarde:', e);
-        showToast('❌ Erreur: ' + e.message, 'error');
-    }
+        await firebaseDb.ref(`sauvegardes/${userId}`).set(data);
+        showToast('✅ Données sauvegardées dans le cloud !', 'success');
+    } catch(e) { showToast('❌ Erreur de sauvegarde: ' + e.message, 'error'); }
 }
 
 async function chargerCloud() {
-    if (!firebaseReady || !firebaseDb) {
-        showToast('Firebase non configuré', 'error');
-        return;
-    }
-    
-    const cloudKey = 'partage_universel';
-    
+    if (!firebaseReady || !firebaseDb) { showToast('Firebase non configuré', 'error'); return; }
     try {
-        const snapshot = await firebaseDb.ref(`sauvegardes/${cloudKey}`).once('value');
+        const snapshot = await firebaseDb.ref(`sauvegardes/${userId}`).once('value');
         const data = snapshot.val();
-        
         if (data) {
             if (data.favoris) favoris = data.favoris;
             if (data.grillesHistory) grillesHistory = data.grillesHistory;
             if (data.userDraws) userDraws = data.userDraws;
-            
             localStorage.setItem('loto_favoris', JSON.stringify(favoris));
             localStorage.setItem('loto_grilles', JSON.stringify(grillesHistory));
             localStorage.setItem('loto_user_draws', JSON.stringify(userDraws));
-            
-            updateAllData();
-            renderDashboard();
-            renderHistory();
-            
-            showToast('✅ Données chargées depuis le cloud partagé !', 'success');
-        } else {
-            showToast('Aucune sauvegarde trouvée. Sauvegardez d\'abord.', 'info');
-        }
-    } catch(e) {
-        console.error('Erreur chargement:', e);
-        showToast('❌ Erreur: ' + e.message, 'error');
-    }
+            updateAllData(); renderDashboard(); renderHistory();
+            showToast('✅ Données chargées depuis le cloud !', 'success');
+        } else { showToast('Aucune sauvegarde trouvée', 'info'); }
+    } catch(e) { showToast('❌ Erreur de chargement: ' + e.message, 'error'); }
 }
 
 function shareCurrentGrille() {
-    if (!lastGeneratedGrille) {
-        showToast('Générez d\'abord une grille', 'error');
-        return;
-    }
-    
+    if (!lastGeneratedGrille) { showToast('Générez d\'abord une grille', 'error'); return; }
     const text = `Ma grille Loto : ${lastGeneratedGrille.balls.join('-')} + ${lastGeneratedGrille.chance}`;
-    if (navigator.share) {
-        navigator.share({
-            title: 'Ma grille Loto',
-            text: text,
-            url: window.location.href
-        }).catch(() => {
-            navigator.clipboard.writeText(text);
-            showToast('Grille copiée dans le presse-papier !');
-        });
-    } else {
-        navigator.clipboard.writeText(text);
-        showToast('Grille copiée dans le presse-papier !');
-    }
+    if (navigator.share) { navigator.share({ title: 'Ma grille Loto', text: text, url: window.location.href }).catch(() => { navigator.clipboard.writeText(text); showToast('Grille copiée dans le presse-papier !'); }); } 
+    else { navigator.clipboard.writeText(text); showToast('Grille copiée dans le presse-papier !'); }
 }
 
 // ==================== LANCEMENT ====================
