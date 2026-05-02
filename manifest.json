@@ -5,6 +5,7 @@
   "start_url": ".",
   "display": "standalone",
   "orientation": "portrait",
+    "scope": "/loto-pro/",
   "theme_color": "#13131c",
   "background_color": "#0a0a0f",
   "icons": [
