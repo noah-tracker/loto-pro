@@ -1365,5 +1365,14 @@ function shareCurrentGrille() {
 // ==================== LANCEMENT ====================
 document.addEventListener('DOMContentLoaded', initApp);
 </script>
+<script>
+if ('serviceWorker' in navigator) {
+    window.addEventListener('load', () => {
+        navigator.serviceWorker.register('/sw.js')
+            .then(reg => console.log('✅ SW enregistré', reg))
+            .catch(err => console.log('❌ Erreur SW', err));
+    });
+}
+</script>
 </body>
 </html>
