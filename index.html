@@ -292,7 +292,7 @@
 const FIREBASE_CONFIG = {
     apiKey: "AIzaSyA5zH584RVWIe4KSEmHpZhfR0b2Q-OTQYc",
     authDomain: "loto-pro-8dcfe.firebaseapp.com",
-    databaseURL: "https://loto-pro-8dcfe-default-rtdb.firebaseio.com",
+    databaseURL: "https://loto-pro-8dcfe-default-rtdb.europe-west1.firebasedatabase.app",  // ← NOTEZ LA RÉGION
     projectId: "loto-pro-8dcfe",
     storageBucket: "loto-pro-8dcfe.firebasestorage.app",
     messagingSenderId: "951598791633",
@@ -313,24 +313,40 @@ let firebaseDb = null;
 let firebaseReady = false;
 let userId = localStorage.getItem('loto_user_id');
 
-// Initialisation Firebase
-try {
-    if (FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey !== "AIzaSyA5zH584RVWIe4KSEmHpZhfR0b2Q-OTQYc") {
-        firebase.initializeApp(FIREBASE_CONFIG);
-        firebaseDb = firebase.database();
-        firebaseReady = true;
-        console.log("✅ Firebase connecté !");
-    } else {
-        console.warn("⚠️ Firebase non configuré - utilisez vos propres clés");
-    }
-} catch(e) {
-    console.error("❌ Firebase error:", e);
-}
-
 // ID utilisateur unique
 if (!userId) {
     userId = 'user_' + Math.random().toString(36).substr(2, 9);
     localStorage.setItem('loto_user_id', userId);
+}
+
+// Initialisation Firebase - VERSION CORRIGÉE
+try {
+    // Vérifier que la clé API existe (pas besoin de comparer avec une valeur par défaut)
+    if (FIREBASE_CONFIG.apiKey && FIREBASE_CONFIG.apiKey.startsWith('AIza')) {
+        // Réinitialiser si déjà initialisé
+        if (firebase.apps.length) {
+            firebase.apps.forEach(app => app.delete());
+        }
+        firebase.initializeApp(FIREBASE_CONFIG);
+        firebaseDb = firebase.database();
+        firebaseReady = true;
+        console.log("✅ Firebase connecté avec succès !");
+        console.log("📁 Database URL:", FIREBASE_CONFIG.databaseURL);
+        
+        // Tester la connexion
+        firebaseDb.ref('.info/connected').on('value', (snap) => {
+            if (snap.val() === true) {
+                console.log("📡 Connecté à Firebase Realtime Database");
+                showToast('☁️ Cloud connecté', 'success');
+            }
+        });
+    } else {
+        console.warn("⚠️ Firebase non configuré - clé API manquante ou invalide");
+        showToast('⚠️ Firebase non configuré', 'error');
+    }
+} catch(e) {
+    console.error("❌ Firebase error:", e);
+    showToast('❌ Erreur Firebase: ' + e.message, 'error');
 }
 
 // ==================== CHARGEMENT CSV ====================
