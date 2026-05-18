@@ -1,4 +1,4 @@
-const CACHE_NAME = 'loto-pro-v2';
+const CACHE_NAME = 'loto-pro-v3';
 const urlsToCache = [
     '/loto-pro/',
     '/loto-pro/index.html',
