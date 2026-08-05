@@ -314,7 +314,7 @@ const FIREBASE_CONFIG = {
 let draws = [];
 let userDraws = [];
 let lastGeneratedGrille = null;
-let grillesHistory = [];
+let grillesHistory = JSON.parse(localStorage.getItem('loto_grilles') || '[]');
 let favoris = JSON.parse(localStorage.getItem('loto_favoris') || '[]');
 let csvTexts = [];
 
@@ -385,15 +385,46 @@ function prochainTirage() {
     return '?';
 }
 
-// ==================== CHARGEMENT CSV ====================
+// ==================== CHARGEMENT CSV AMÉLIORÉ ====================
+const CSV_FILES = [
+    'loto2017.csv',
+    'nouveau_loto.csv',
+    'grandloto_201912.csv',
+    'loto_201902.csv',
+    'loto_201911.csv',
+    'lotonoel2017.csv',
+    'superloto2017.csv',
+    'superloto_201907.csv',
+    'nouveau_superloto.csv'
+];
+
 async function loadCSV() {
-    try {
-        const response = await fetch('loto_201911.csv');
-        if (!response.ok) throw new Error('Fichier non trouvé');
-        const text = await response.text();
-        csvTexts.push(text);
+    let loadedCount = 0;
+    for (const file of CSV_FILES) {
+        try {
+            const response = await fetch(file);
+            if (response.ok) {
+                const text = await response.text();
+                csvTexts.push(text);
+                loadedCount++;
+                console.log(`✓ Chargé: ${file}`);
+            } else {
+                console.log(`⚠ Non trouvé: ${file}`);
+            }
+        } catch (e) {
+            console.log(`✗ Erreur: ${file} - ${e.message}`);
+        }
+    }
+    if (loadedCount > 0) {
+        console.log(`📊 ${loadedCount} fichier(s) CSV chargé(s)`);
         return true;
-    } catch (e) { return false; }
+    }
+    return false;
+}
+
+async function detectAndLoadAllCSV() {
+    // Tente de charger tous les fichiers CSV connus
+    return await loadCSV();
 }
 
 function importCSVFromFile(file) {
@@ -421,32 +452,64 @@ function handleAdditionalImport(event) { processImport(event.target.files, false
 function ajouterCSV() { document.getElementById('csvFileInputAdd').click(); }
 
 function parseCSV(csv) {
-    const lines = csv.trim().split('\n');
+    const lines = csv.trim().split(/\r?\n/);
     if (lines.length < 2) return [];
-    const headers = lines[0].split(';');
+    const headers = lines[0].split(';').map(h => h.trim());
     const data = [];
+    
+    // Détecter le format du fichier (certains CSV ont des formats différents)
+    const hasBoule1 = headers.some(h => h.includes('boule_1') || h === 'boule1');
+    const hasDate = headers.some(h => h.includes('date'));
+    
     for (let i = 1; i < lines.length; i++) {
         const line = lines[i].trim();
         if (!line) continue;
+        
+        // Gérer les valeurs entre guillemets contenant des points-virgules
         const values = [];
         let current = '';
         let inQuotes = false;
+        
         for (let j = 0; j < line.length; j++) {
             const ch = line[j];
-            if (ch === '"') { inQuotes = !inQuotes; continue; }
-            if (ch === ';' && !inQuotes) { values.push(current); current = ''; continue; }
+            if (ch === '"') { 
+                inQuotes = !inQuotes; 
+                continue; 
+            }
+            if (ch === ';' && !inQuotes) { 
+                values.push(current.trim()); 
+                current = ''; 
+                continue; 
+            }
             current += ch;
         }
-        values.push(current);
-        if (values.length < headers.length) continue;
+        values.push(current.trim());
+        
+        if (values.length < Math.min(headers.length, 5)) continue;
+        
         const obj = {};
         headers.forEach((h, idx) => {
             let val = values[idx] || '';
-            if (h.includes('rapport') || h.includes('nombre_de_gagnant') || h.includes('boule') || h === 'numero_chance') {
-                val = val.replace(',', '.');
+            // Nettoyer les valeurs numériques
+            if (h.includes('rapport') || h.includes('nombre_de_gagnant') || 
+                h.includes('boule') || h === 'numero_chance' || h.includes('chance')) {
+                val = val.replace(',', '.').replace(/\s/g, '');
             }
-            obj[h.trim()] = val;
+            obj[h] = val;
         });
+        
+        // Normaliser les noms de colonnes pour différents formats CSV
+        if (!obj['date_de_tirage'] && obj['Date']) obj['date_de_tirage'] = obj['Date'];
+        if (!obj['jour_de_tirage'] && obj['Jour']) obj['jour_de_tirage'] = obj['Jour'];
+        if (!obj['boule_1'] && obj['Boule1']) {
+            obj['boule_1'] = obj['Boule1'];
+            obj['boule_2'] = obj['Boule2'] || '';
+            obj['boule_3'] = obj['Boule3'] || '';
+            obj['boule_4'] = obj['Boule4'] || '';
+            obj['boule_5'] = obj['Boule5'] || '';
+            obj['numero_chance'] = obj['Chance'] || '';
+        }
+        
         data.push(obj);
     }
     return data;
@@ -454,17 +517,45 @@ function parseCSV(csv) {
 
 function buildDraws(rawData) {
     return rawData.map(r => {
-        const date = parseDate(r['date_de_tirage'] || '');
-        const boules = [1,2,3,4,5].map(i => parseInt(r['boule_'+i]) || 0).filter(b => b > 0).sort((a,b)=>a-b);
-        const chance = parseInt(r['numero_chance']) || 0;
-        const nb_gagnants_rang1 = parseInt(r['nombre_de_gagnant_au_rang1']) || 0;
-        const rapport_rang1 = parseFloat(r['rapport_du_rang1']) || 0;
+        // Essayer différents formats de date
+        let dateStr = r['date_de_tirage'] || r['Date'] || r['DATE'] || '';
+        const date = parseDate(dateStr);
+        
+        // Récupérer les boules (plusieurs formats possibles)
+        let boules = [];
+        if (r['boule_1']) {
+            boules = [1,2,3,4,5].map(i => parseInt(r['boule_'+i]) || 0).filter(b => b > 0);
+        } else if (r['Boule1']) {
+            boules = [1,2,3,4,5].map(i => parseInt(r['Boule'+i]) || 0).filter(b => b > 0);
+        } else if (r['combinaison_gagnante_en_ordre_croissant']) {
+            // Extraire depuis la combinaison complète (ex: "7-37-38-44-48+7")
+            const combo = r['combinaison_gagnante_en_ordre_croissant'];
+            const mainPart = combo.split('+')[0];
+            boules = mainPart.split('-').map(n => parseInt(n.trim()) || 0).filter(b => b > 0);
+        }
+        boules.sort((a,b)=>a-b);
+        
+        // Numéro chance
+        let chance = parseInt(r['numero_chance']) || 0;
+        if (!chance && r['Chance']) chance = parseInt(r['Chance']) || 0;
+        if (!chance && r['combinaison_gagnante_en_ordre_croissant']) {
+            const combo = r['combinaison_gagnante_en_ordre_croissant'];
+            const parts = combo.split('+');
+            if (parts.length > 1) {
+                chance = parseInt(parts[1].trim()) || 0;
+            }
+        }
+        
+        const nb_gagnants_rang1 = parseInt(r['nombre_de_gagnant_au_rang1'] || r['Nombre_de_gagnant_au_rang1'] || '0') || 0;
+        const rapport_rang1 = parseFloat((r['rapport_du_rang1'] || r['Rapport_du_rang1'] || '0').replace(',', '.')) || 0;
+        
         const second_boules = [1,2,3,4,5].map(i => parseInt(r['boule_'+i+'_second_tirage']) || 0).filter(b => b > 0).sort((a,b)=>a-b);
         const codes = (r['codes_gagnants'] || '').split(',').map(c => c.trim()).filter(c => c);
         const special = r['promotion_second_tirage'] || '';
-        const jour = r['jour_de_tirage'] || '';
+        const jour = (r['jour_de_tirage'] || r['Jour'] || '').trim().toUpperCase();
+        
         return { date, jour, boules, chance, nb_gagnants_rang1, rapport_rang1, second_boules, codes, special, isUser: false, raw: r };
-    }).filter(d => d.boules.length === 5 && d.chance >= 1 && d.chance <= 10);
+    }).filter(d => d.boules.length === 5 && d.chance >= 1 && d.chance <= 10 && !isNaN(d.date.getTime()));
 }
 
 function updateAllData() {
@@ -499,9 +590,13 @@ function startApplication() {
         let allRawData = [];
         for (let i = 0; i < csvTexts.length; i++) {
             const rawData = parseCSV(csvTexts[i]);
+            console.log(`Fichier ${i+1}: ${rawData.length} lignes`);
             allRawData = allRawData.concat(rawData);
         }
         draws = buildDraws(allRawData);
+        console.log(`Tirages construits: ${draws.length}`);
+        
+        // Supprimer les doublons
         const seen = new Set();
         draws = draws.filter(d => {
             const key = formatDate(d.date) + '|' + d.boules.join(',') + '|' + d.chance;
@@ -510,15 +605,20 @@ function startApplication() {
             return true;
         });
         draws.sort((a,b) => b.date - a.date);
+        
         const saved = localStorage.getItem('loto_user_draws');
         if (saved) userDraws = JSON.parse(saved);
         updateAllData();
+        
         document.getElementById('nbTirages').textContent = draws.length;
         const dern = draws.length > 0 ? draws[0] : null;
         document.getElementById('headerDate').textContent = dern ? `Dernier tirage : ${formatDate(dern.date)}` : 'Aucun';
+        
+        // Afficher un message de succès
+        showToast(`${draws.length} tirages chargés avec succès !`);
         showTab('dashboard');
     } catch(e) {
-        alert('Erreur : ' + e.message);
+        alert('Erreur lors du chargement : ' + e.message);
         console.error(e);
     }
 }
@@ -750,6 +850,7 @@ function afficherAnalyse(balls, chance, tries, freqNorm, recencyNorm) {
 function addHistory(balls, chance, tries) {
     grillesHistory.unshift({balls, chance, tries, date: new Date().toLocaleTimeString('fr')});
     if (grillesHistory.length>20) grillesHistory.pop();
+    localStorage.setItem('loto_grilles', JSON.stringify(grillesHistory));
     renderHistory();
 }
 
