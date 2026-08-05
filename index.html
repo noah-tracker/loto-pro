@@ -130,6 +130,7 @@
     <button class="tab" onclick="showTab('verifier')">🔍</button>
     <button class="tab" onclick="showTab('saisie')">✏️</button>
     <button class="tab" onclick="showTab('parjour')">📅</button>
+    <button class="tab" onclick="showTab('analyses')" style="color:var(--purple)">🔬</button>
     <button class="tab" onclick="ajouterCSV()" style="color:var(--green)">➕</button>
 </div>
 <div class="content">
@@ -295,6 +296,85 @@
         <div class="grid grid-2">
             <div class="card"><h3>Fréquences par jour</h3><div class="chart-container"><canvas id="parjourFreqChart"></canvas></div></div>
             <div class="card"><h3>Top numéros par jour</h3><div id="parjourTopNums"></div></div>
+        </div>
+    </div>
+
+    <!-- NOUVEL ONGLET : ANALYSES AVANCÉES -->
+    <div class="section" id="sec-analyses">
+        <div class="card">
+            <h3>📊 Tableau de bord statistique complet</h3>
+            <p style="color:var(--text2); font-size:12px; margin-bottom:1rem;">Analyses avancées : régression, corrélation, chi-carré, saisonnalité, matrice de chaleur</p>
+        </div>
+        
+        <!-- Régression linéaire et tendances -->
+        <div class="grid grid-2">
+            <div class="card">
+                <h3>📈 Tendances par régression linéaire</h3>
+                <div class="chart-container"><canvas id="regressionChart"></canvas></div>
+                <div id="regressionInsights" style="margin-top:1rem; font-size:12px; color:var(--text2)"></div>
+            </div>
+            <div class="card">
+                <h3>🔥 Numéros en hausse / en baisse</h3>
+                <div id="trendNumbers" style="display:grid; grid-template-columns:repeat(2,1fr); gap:8px;"></div>
+            </div>
+        </div>
+
+        <!-- Matrice de corrélation -->
+        <div class="card">
+            <h3>🔗 Matrice de corrélation entre numéros</h3>
+            <p style="color:var(--text2); font-size:11px; margin-bottom:8px;">Visualisation des paires de numéros qui sortent souvent ensemble (corrélation positive) ou rarement ensemble (corrélation négative)</p>
+            <div style="overflow-x:auto;"><div id="correlationMatrix" style="min-width:600px;"></div></div>
+            <div id="topCorrelations" style="margin-top:1rem; display:grid; grid-template-columns:repeat(3,1fr); gap:8px;"></div>
+        </div>
+
+        <!-- Test du chi-carré -->
+        <div class="grid grid-2">
+            <div class="card">
+                <h3>🎲 Test du χ² (Chi-carré) - Aléatoire</h3>
+                <div id="chiSquareResult" style="text-align:center; padding:1rem;"></div>
+                <div class="chart-container"><canvas id="chiSquareChart"></canvas></div>
+            </div>
+            <div class="card">
+                <h3>📏 Déviation standard par position</h3>
+                <div id="stdDevByPosition" style="display:grid; grid-template-columns:repeat(5,1fr); gap:8px;"></div>
+                <div class="chart-container" style="margin-top:1rem;"><canvas id="stdDevChart"></canvas></div>
+            </div>
+        </div>
+
+        <!-- Analyse saisonnière -->
+        <div class="card">
+            <h3>📅 Analyse saisonnière et cycles</h3>
+            <div class="grid grid-2">
+                <div>
+                    <p style="color:var(--text2); font-size:11px; margin-bottom:8px;">Variation des fréquences par mois</p>
+                    <div class="chart-container"><canvas id="seasonalChart"></canvas></div>
+                </div>
+                <div>
+                    <p style="color:var(--text2); font-size:11px; margin-bottom:8px;">Détection de cycles et périodicité</p>
+                    <div id="cycleAnalysis" style="background:var(--surface2); border-radius:12px; padding:1rem;"></div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Loi de Benford -->
+        <div class="grid grid-2">
+            <div class="card">
+                <h3>🔢 Loi de Benford appliquée</h3>
+                <p style="color:var(--text2); font-size:11px; margin-bottom:8px;">Distribution attendue vs observée des premiers chiffres</p>
+                <div class="chart-container"><canvas id="benfordChart"></canvas></div>
+                <div id="benfordAnalysis" style="margin-top:1rem; font-size:12px; color:var(--text2)"></div>
+            </div>
+            <div class="card">
+                <h3>🎯 Heatmap des positions</h3>
+                <p style="color:var(--text2); font-size:11px; margin-bottom:8px;">Fréquence d'apparition par position (1er à 5ème numéro)</p>
+                <div id="positionHeatmap" style="display:grid; grid-template-columns:repeat(5,1fr); gap:4px;"></div>
+            </div>
+        </div>
+
+        <!-- Indicateurs avancés -->
+        <div class="card">
+            <h3>📊 Indicateurs statistiques avancés</h3>
+            <div id="advancedIndicators" style="display:grid; grid-template-columns:repeat(4,1fr); gap:12px;"></div>
         </div>
     </div>
 </div>
@@ -655,6 +735,7 @@ function showTab(id) {
     if (id==='historique') renderHistorique();
     if (id==='saisie') initSaisie();
     if (id==='parjour') renderParJour();
+    if (id==='analyses') renderAdvancedAnalyses();
 }
 
 function renderDashboard() {
@@ -995,6 +1076,121 @@ function exportAnalyses() { /* identique */ }
 function sauvegarderCloud() { /* identique */ }
 function chargerCloud() { /* identique */ }
 function shareCurrentGrille() { if (!lastGeneratedGrille) { showToast('Générez d\'abord une grille', 'error'); return; } const text = `Ma grille Loto : ${lastGeneratedGrille.balls.join('-')} + ${lastGeneratedGrille.chance}`; if (navigator.share) { navigator.share({ title: 'Ma grille Loto', text: text, url: window.location.href }).catch(() => { navigator.clipboard.writeText(text); showToast('Grille copiée !'); }); } else { navigator.clipboard.writeText(text); showToast('Grille copiée !'); } }
+
+// ==================== ANALYSES AVANCÉES ====================
+function renderAdvancedAnalyses() {
+    renderRegressionAnalysis();
+    renderCorrelationMatrix();
+    renderChiSquareTest();
+    renderStdDevByPosition();
+    renderSeasonalAnalysis();
+    renderBenfordLaw();
+    renderPositionHeatmap();
+    renderAdvancedIndicators();
+}
+
+function renderRegressionAnalysis() {
+    const recent = draws.slice(0, 100).reverse();
+    const trends = {};
+    for (let n = 1; n <= 49; n++) {
+        const x = [], y = [];
+        recent.forEach((d, idx) => { x.push(idx); y.push(d.boules.includes(n) ? 1 : 0); });
+        const n_ = x.length, sumX = x.reduce((a,b)=>a+b,0), sumY = y.reduce((a,b)=>a+b,0);
+        const sumXY = x.reduce((acc, xi, i) => acc + xi * y[i], 0);
+        const sumXX = x.reduce((acc, xi) => acc + xi*xi, 0);
+        const slope = (n_ * sumXY - sumX * sumY) / (n_ * sumXX - sumX * sumX + 0.001);
+        trends[n] = slope;
+    }
+    const labels = Array.from({length:49}, (_,i)=>i+1);
+    const data = labels.map(n => trends[n]);
+    const ctx = document.getElementById('regressionChart')?.getContext('2d');
+    if (ctx) {
+        if (window.regressionChartInstance) window.regressionChartInstance.destroy();
+        window.regressionChartInstance = new Chart(ctx, { type: 'bar', data: { labels, datasets: [{ label: 'Pente de tendance', data, backgroundColor: data.map(v => v > 0.01 ? '#ff5252' : v < -0.01 ? '#4a9eff' : '#3ecf8e') }] }, options: { responsive: true, maintainAspectRatio: false } });
+    }
+    const rising = Object.entries(trends).filter(([_,v]) => v > 0.02).sort((a,b)=>b[1]-a[1]).slice(0,5);
+    const falling = Object.entries(trends).filter(([_,v]) => v < -0.02).sort((a,b)=>a[1]-b[1]).slice(0,5);
+    document.getElementById('trendNumbers').innerHTML = `<div style="background:var(--surface2);border-radius:12px;padding:1rem"><h4 style="color:var(--green);font-size:12px;margin-bottom:8px">📈 En hausse</h4><div class="balls-row">${rising.map(([n])=>`<div class="ball ball-hot ball-sm">${n}</div>`).join('')}</div></div><div style="background:var(--surface2);border-radius:12px;padding:1rem"><h4 style="color:var(--red);font-size:12px;margin-bottom:8px">📉 En baisse</h4><div class="balls-row">${falling.map(([n])=>`<div class="ball ball-cold ball-sm">${n}</div>`).join('')}</div></div>`;
+    document.getElementById('regressionInsights').innerHTML = `<p style="font-size:11px;color:var(--text2)">Basé sur ${recent.length} tirages. Pente > 0.02 = hausse, < -0.02 = baisse.</p>`;
+}
+
+function renderCorrelationMatrix() {
+    const pairCounts = {}, singleCounts = {};
+    for (let i=1; i<=49; i++) singleCounts[i] = 0;
+    draws.forEach(d => { d.boules.forEach(b => singleCounts[b]++); for (let i=0; i<d.boules.length; i++) for (let j=i+1; j<d.boules.length; j++) { const key = `${Math.min(d.boules[i],d.boules[j])}-${Math.max(d.boules[i],d.boules[j])}`; pairCounts[key] = (pairCounts[key]||0)+1; }});
+    const correlations = [], N = draws.length;
+    for (let i=1; i<=49; i++) for (let j=i+1; j<=49; j++) {
+        const key = `${i}-${j}`, n11 = pairCounts[key]||0, n1_ = singleCounts[i], n_1 = singleCounts[j];
+        const n00 = N-n1_-n_1+n11, n10 = n1_-n11, n01 = n_1-n11;
+        const phi = (n11*n00-n10*n01)/(Math.sqrt(n1_*n_1*(N-n1_)*(N-n_1))+0.001);
+        if (Math.abs(phi)>0.05) correlations.push({ pair:key, phi:phi.toFixed(3) });
+    }
+    correlations.sort((a,b)=>Math.abs(b.phi)-Math.abs(a.phi));
+    const topPos = correlations.filter(c=>c.phi>0).slice(0,10), topNeg = correlations.filter(c=>c.phi<0).slice(0,10);
+    document.getElementById('topCorrelations').innerHTML = `<div style="background:var(--surface2);border-radius:12px;padding:1rem"><h4 style="color:var(--green);font-size:12px;margin-bottom:8px">✅ Positives</h4>${topPos.map(c=>`<div style="font-size:11px;color:var(--text2);padding:4px 0">${c.pair}: ${c.phi}</div>`).join('')}</div><div style="background:var(--surface2);border-radius:12px;padding:1rem"><h4 style="color:var(--red);font-size:12px;margin-bottom:8px">❌ Négatives</h4>${topNeg.map(c=>`<div style="font-size:11px;color:var(--text2);padding:4px 0">${c.pair}: ${c.phi}</div>`).join('')}</div><div style="background:var(--surface2);border-radius:12px;padding:1rem"><h4 style="color:var(--gold);font-size:12px;margin-bottom:8px">📊 Top</h4>${correlations.slice(0,8).map(c=>`<div style="font-size:11px;color:var(--text2);padding:4px 0">${c.pair}: <strong style="color:${c.phi>0?'var(--green)':'var(--red)'}">${c.phi}</strong></div>`).join('')}</div>`;
+    const sortedFreq = Object.entries(singleCounts).sort((a,b)=>b[1]-a[1]).slice(0,20).map(([n])=>parseInt(n));
+    let matrixHtml = '<table style="font-size:9px;border-collapse:collapse"><tr><th></th>'+sortedFreq.map(n=>`<th style="padding:2px;width:25px">${n}</th>`).join('')+'</tr>';
+    sortedFreq.forEach(i => { matrixHtml += `<tr><td style="font-weight:bold;padding:2px">${i}</td>`; sortedFreq.forEach(j => { if(i===j) matrixHtml += `<td style="background:var(--gold);padding:2px"></td>`; else { const key=`${Math.min(i,j)}-${Math.max(i,j)}`, corr=correlations.find(c=>c.pair===key), phi=corr?parseFloat(corr.phi):0; const color=phi>0.1?`rgba(62,207,142,${Math.min(Math.abs(phi),1)})`:phi<-0.1?`rgba(255,82,82,${Math.min(Math.abs(phi),1)})`:'transparent'; matrixHtml += `<td style="background:${color};padding:2px;border:1px solid var(--border)"></td>`; }}); matrixHtml += '</tr>'; });
+    document.getElementById('correlationMatrix').innerHTML = matrixHtml + '</table>';
+}
+
+function renderChiSquareTest() {
+    const observed = {}; for (let i=1;i<=49;i++) observed[i]=0;
+    draws.forEach(d => d.boules.forEach(b => observed[b]++));
+    const total = draws.length*5, expected = total/49;
+    let chiSquare = 0; for (let i=1;i<=49;i++) chiSquare += Math.pow(observed[i]-expected,2)/expected;
+    const isRandom = chiSquare < 65.17;
+    document.getElementById('chiSquareResult').innerHTML = `<div style="display:inline-block;text-align:center"><div style="font-size:36px;font-weight:700;color:${isRandom?'var(--green)':'var(--red)'}">${chiSquare.toFixed(2)}</div><div style="font-size:11px;color:var(--text2)">χ² (seuil: 65.17)</div><div style="margin-top:8px;padding:6px 12px;background:${isRandom?'rgba(62,207,142,0.15)':'rgba(255,82,82,0.15)'};border-radius:8px;font-size:12px">${isRandom?'✅ Aléatoire':'⚠️ Biais'}</div></div>`;
+    const ctx = document.getElementById('chiSquareChart')?.getContext('2d');
+    if (ctx) { if(window.chiSquareChartInstance)window.chiSquareChartInstance.destroy(); window.chiSquareChartInstance = new Chart(ctx,{type:'bar',data:{labels:Array.from({length:49},(_,i)=>i+1),datasets:[{label:'Observé',data:Object.values(observed),backgroundColor:Object.values(observed).map(v=>Math.abs(v-expected)>expected*0.1?'#ff5252':'#3ecf8e')},{label:'Attendu',data:Array(49).fill(expected),type:'line',borderColor:'#f4c430',borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false}}); }
+}
+
+function renderStdDevByPosition() {
+    const positions = [[],[],[],[],[]];
+    draws.forEach(d => { const sorted=[...d.boules].sort((a,b)=>a-b); sorted.forEach((n,idx)=>positions[idx].push(n)); });
+    const stdDevs = positions.map(pos => { const mean=pos.reduce((a,b)=>a+b,0)/pos.length; return Math.sqrt(pos.reduce((acc,val)=>acc+Math.pow(val-mean,2),0)/pos.length); });
+    const means = positions.map(pos => pos.reduce((a,b)=>a+b,0)/pos.length);
+    document.getElementById('stdDevByPosition').innerHTML = stdDevs.map((sd,idx)=>`<div style="background:var(--surface2);border-radius:12px;padding:1rem;text-align:center"><div style="font-size:10px;color:var(--text2)">Pos ${idx+1}</div><div style="font-size:20px;font-weight:700;color:var(--gold)\">${sd.toFixed(2)}</div><div style="font-size:9px;color:var(--text3)">Moy: ${means[idx].toFixed(1)}</div></div>`).join('');
+    const ctx = document.getElementById('stdDevChart')?.getContext('2d');
+    if (ctx) { if(window.stdDevChartInstance)window.stdDevChartInstance.destroy(); window.stdDevChartInstance = new Chart(ctx,{type:'bar',data:{labels:['1er','2ème','3ème','4ème','5ème'],datasets:[{label:'Déviation std',data:stdDevs,backgroundColor:'#a78bfa'}]},options:{responsive:true,maintainAspectRatio:false}}); }
+}
+
+function renderSeasonalAnalysis() {
+    const monthlyFreq = {}; for(let m=0;m<12;m++){monthlyFreq[m]={};for(let i=1;i<=49;i++)monthlyFreq[m][i]=0;}
+    draws.forEach(d => { const month=d.date.getMonth(); d.boules.forEach(b=>monthlyFreq[month][b]++); });
+    const months=['Jan','Fév','Mar','Avr','Mai','Juin','Juil','Août','Sep','Oct','Nov','Déc'];
+    const ctx = document.getElementById('seasonalChart')?.getContext('2d');
+    if(ctx){if(window.seasonalChartInstance)window.seasonalChartInstance.destroy();const datasets=[0,2,5,8].map(m=>({label:months[m],data:Array.from({length:49},(_,i)=>monthlyFreq[m][i+1]),borderColor:['#f4c430','#3ecf8e'][m%2],borderWidth:2,tension:0.3,pointRadius:0}));window.seasonalChartInstance=new Chart(ctx,{type:'line',data:{labels:Array.from({length:49},(_,i)=>i+1),datasets},options:{responsive:true,maintainAspectRatio:false}});}
+    const cycleData=[]; for(let p=2;p<=20;p++){let s=0;for(let i=0;i<draws.length-p;i++)s+=draws[i].boules.filter(b=>draws[i+p].boules.includes(b)).length;cycleData.push({period:p,avg:s/(draws.length-p)});}
+    const best=cycleData.reduce((a,b)=>a.avg>b.avg?a:b);
+    document.getElementById('cycleAnalysis').innerHTML = `<div style="font-size:11px;color:var(--text2);margin-bottom:8px\">Périodicité (2-20 tirages)</div><div style="font-size:24px;font-weight:700;color:var(--purple)\">~${best.period}</div><div style="font-size:10px;color:var(--text3)\">Overlap: ${best.avg.toFixed(2)}</div><div style="margin-top:8px;display:flex;gap:4px;flex-wrap:wrap\">${cycleData.slice(0,10).map(c=>`<span style="font-size:9px;padding:2px 6px;background:var(--surface);border-radius:4px\">${c.period}:${c.avg.toFixed(2)}</span>`).join('')}</div>`;
+}
+
+function renderBenfordLaw() {
+    const firstDigits={};for(let i=1;i<=9;i++)firstDigits[i]=0;
+    draws.forEach(d=>d.boules.forEach(b=>firstDigits[parseInt(b.toString()[0])]++));
+    const total=Object.values(firstDigits).reduce((a,b)=>a+b,0),observed=Object.values(firstDigits).map(v=>v/total),expected=Array.from({length:9},(_,i)=>Math.log10(1+1/(i+1)));
+    const ctx=document.getElementById('benfordChart')?.getContext('2d');
+    if(ctx){if(window.benfordChartInstance)window.benfordChartInstance.destroy();window.benfordChartInstance=new Chart(ctx,{type:'bar',data:{labels:[1,2,3,4,5,6,7,8,9],datasets:[{label:'Observé',data:observed,backgroundColor:'#ff6b6b'},{label:'Benford',data:expected,type:'line',borderColor:'#3ecf8e',borderWidth:2}]},options:{responsive:true,maintainAspectRatio:false}});}
+    const dev=observed.reduce((acc,o,i)=>acc+Math.abs(o-expected[i]),0)/9;
+    document.getElementById('benfordAnalysis').innerHTML=`<div style="font-size:11px;color:var(--text2)\">Écart Benford: <strong style="color:${dev<0.05?'var(--green)':'var(--orange)'}">${(dev*100).toFixed(1)}%</strong><br>${dev<0.05?'✅ Conforme':'⚠️ Écart'}</div>`;
+}
+
+function renderPositionHeatmap() {
+    const posFreq=[[],[],[],[],[]];for(let i=0;i<5;i++)for(let n=1;n<=49;n++)posFreq[i][n]=0;
+    draws.forEach(d=>{const sorted=[...d.boules].sort((a,b)=>a-b);sorted.forEach((n,idx)=>posFreq[idx][n]++);});
+    const maxFreq=Math.max(...posFreq.flat());
+    let html='';for(let pos=0;pos<5;pos++){html+=`<div style="display:grid;grid-template-columns:repeat(10,1fr);gap:2px">`;for(let n=1;n<=49;n++){const f=posFreq[pos][n],intensity=f/maxFreq,color=`rgba(74,158,255,${intensity})`;html+=`<div style="aspect-ratio:1;background:${color};border-radius:2px;display:flex;align-items:center;justify-content:center;font-size:8px;color:${intensity>0.5?'#fff':'var(--text3)'}">${n}</div>`;}html+=`</div>`;}
+    document.getElementById('positionHeatmap').innerHTML=html;
+}
+
+function renderAdvancedIndicators() {
+    const N=draws.length,freqs={};for(let i=1;i<=49;i++)freqs[i]=0;draws.forEach(d=>d.boules.forEach(b=>freqs[b]++));
+    const probs=Object.values(freqs).map(f=>f/(N*5)),entropy=-probs.reduce((acc,p)=>p>0?acc+p*Math.log2(p):acc,0),maxEntropy=Math.log2(49),entropyRatio=entropy/maxEntropy;
+    const sortedFreqs=Object.values(freqs).sort((a,b)=>a-b);let cumsum=0;for(let i=0;i<sortedFreqs.length;i++)cumsum+=(2*(i+1)-1)*sortedFreqs[i];const gini=(2*cumsum)/(sortedFreqs.length*sortedFreqs.reduce((a,b)=>a+b,0))-(sortedFreqs.length+1)/sortedFreqs.length;
+    const meanFreq=Object.values(freqs).reduce((a,b)=>a+b,0)/49,variance=Object.values(freqs).reduce((acc,f)=>acc+Math.pow(f-meanFreq,2),0)/49,cv=Math.sqrt(variance)/meanFreq;
+    document.getElementById('advancedIndicators').innerHTML=`<div class="metric" style="text-align:center"><label>Entropie Shannon</label><div class="val" style="font-size:20px">${entropyRatio.toFixed(3)}</div><div class="sub">Max: 1.0</div></div><div class="metric" style="text-align:center"><label>Indice Gini</label><div class="val" style="font-size:20px">${gini.toFixed(3)}</div><div class="sub">0=égal</div></div><div class="metric" style="text-align:center"><label>Coeff. Variation</label><div class="val" style="font-size:20px">${cv.toFixed(3)}</div><div class="sub">Faible=uniforme</div></div><div class="metric" style="text-align:center"><label>Variance</label><div class="val" style="font-size:20px">${variance.toFixed(1)}</div><div class="sub">Dispersion</div></div>`;
+}
 
 // Recopier les fonctions manquantes non modifiées (pour éviter les erreurs)
 function renderChance() {
