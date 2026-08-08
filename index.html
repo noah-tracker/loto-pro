@@ -804,8 +804,15 @@ function getRecencyScores(drawsList) {
     // drawsList is assumed sorted newest first (index 0 = dernier tirage)
     for (let idx = 0; idx < drawsList.length; idx++) {
         const d = drawsList[idx];
+        // Boules principales - poids 100%
         for (const b of d.boules) {
             if (scores[b] === 0) scores[b] = 1 / (idx + 1); // plus récent = score élevé
+        }
+        // Second tirage - poids 75% si activé
+        if (includeSecondInStats && d.second_boules && d.second_boules.length === 5) {
+            for (const b of d.second_boules) {
+                if (scores[b] === 0) scores[b] = (1 / (idx + 1)) * 0.75;
+            }
         }
     }
     // Normalize between 0 and 1
@@ -819,7 +826,14 @@ function getRecencyScores(drawsList) {
 function getNormalizedFreqs(drawsList) {
     const f = {};
     for (let i = 1; i <= 49; i++) f[i] = 0;
-    drawsList.forEach(d => d.boules.forEach(b => f[b]++));
+    drawsList.forEach(d => {
+        // Boules principales - poids 100%
+        d.boules.forEach(b => f[b]++);
+        // Second tirage - poids 75% si activé
+        if (includeSecondInStats && d.second_boules && d.second_boules.length === 5) {
+            d.second_boules.forEach(b => f[b] += 0.75);
+        }
+    });
     const maxF = Math.max(...Object.values(f));
     if (maxF === 0) return f;
     for (let i = 1; i <= 49; i++) f[i] = f[i] / maxF;
@@ -1018,7 +1032,15 @@ function getFilteredDraws(period) {
 
 function getFreqsForDraws(drawsList) {
     const f = {}; for (let i=1;i<=49;i++) f[i]=0;
-    drawsList.forEach(d => d.boules.forEach(b => f[b]++));
+    drawsList.forEach(d => {
+        // Boules principales - poids 100%
+        d.boules.forEach(b => f[b]++);
+        
+        // Second tirage - poids 75% si activé
+        if (includeSecondInStats && d.second_boules && d.second_boules.length === 5) {
+            d.second_boules.forEach(b => f[b] += 0.75);
+        }
+    });
     return f;
 }
 
@@ -1270,7 +1292,30 @@ function renderScores() {
     document.getElementById('scoreTopFlop').innerHTML = `<div><h4 style="color:var(--text2)">Top 10</h4>${sorted.slice(0,10).map(([n,v])=>`<div>N°${n} : ${v}</div>`).join('')}</div><div><h4 style="color:var(--text2)">Flop 10</h4>${sorted.slice(-10).reverse().map(([n,v])=>`<div>N°${n} : ${v}</div>`).join('')}</div>`;
 }
 function getPopularityIndex() { const pop={}; for(let i=1;i<=49;i++)pop[i]=0; const count={}; for(let i=1;i<=49;i++)count[i]=0; draws.forEach(d=>{if(d.nb_gagnants_rang1>0&&d.rapport_rang1>0){const facteur=1/(d.rapport_rang1/d.nb_gagnants_rang1+100); d.boules.forEach(b=>{pop[b]+=facteur; count[b]++;});}}); for(let i=1;i<=49;i++)if(count[i]>0)pop[i]=pop[i]/count[i]; const maxPop=Math.max(...Object.values(pop)); for(let i=1;i<=49;i++)pop[i]=maxPop>0?pop[i]/maxPop:0; return pop; }
-function getScoreComposite() { const f=getFreqsForDraws(draws); const pop=getPopularityIndex(); const gaps=[]; for(let i=1;i<=49;i++){let last=null;for(let idx=0;idx<draws.length;idx++)if(draws[idx].boules.includes(i)){last=idx;break;} gaps[i]=last!==null?last:draws.length;} const maxFreq=Math.max(...Object.values(f)); const maxGap=Math.max(...gaps); const scores={}; for(let i=1;i<=49;i++){const freqScore=maxFreq>0?(f[i]/maxFreq)*100:0; const popScore=pop[i]*100; const gapScore=maxGap>0?(1-(gaps[i]/maxGap))*100:0; scores[i]=+(freqScore*0.4+popScore*0.3+gapScore*0.3).toFixed(1);} return scores; }
+function getScoreComposite() { 
+    const f=getFreqsForDraws(draws); 
+    const pop=getPopularityIndex(); 
+    const gaps=[]; 
+    for(let i=1;i<=49;i++){
+        let last=null;
+        for(let idx=0;idx<draws.length;idx++){
+            if(draws[idx].boules.includes(i)){last=idx;break;}
+            // Vérifier aussi dans le second tirage si activé
+            if(includeSecondInStats && draws[idx].second_boules && draws[idx].second_boules.includes(i)){last=idx;break;}
+        }
+        gaps[i]=last!==null?last:draws.length;
+    }
+    const maxFreq=Math.max(...Object.values(f)); 
+    const maxGap=Math.max(...gaps); 
+    const scores={}; 
+    for(let i=1;i<=49;i++){
+        const freqScore=maxFreq>0?(f[i]/maxFreq)*100:0; 
+        const popScore=pop[i]*100; 
+        const gapScore=maxGap>0?(1-(gaps[i]/maxGap))*100:0; 
+        scores[i]=+(freqScore*0.4+popScore*0.3+gapScore*0.3).toFixed(1);
+    } 
+    return scores; 
+}
 function analyserRepetitionsConsecutives() { if(draws.length<2)return null; let totalComparaisons=0,repetitions=0,repetitionsParNumero={},repetitionsChance=0,totalChanceComparaisons=0,serieSansRepetition=0,maxSerieSansRepetition=0,series=[],distribution={0:0,1:0,2:0,3:0,4:0,5:0}; for(let i=0;i<draws.length-1;i++){const tirageActuel=draws[i],tirageSuivant=draws[i+1]; const repetes=tirageActuel.boules.filter(b=>tirageSuivant.boules.includes(b)); const nbRepetitions=repetes.length; distribution[nbRepetitions]++; if(nbRepetitions>0){repetitions++; repetes.forEach(num=>{repetitionsParNumero[num]=(repetitionsParNumero[num]||0)+1;}); if(serieSansRepetition>0){series.push(serieSansRepetition); serieSansRepetition=0;}}else{serieSansRepetition++; if(serieSansRepetition>maxSerieSansRepetition)maxSerieSansRepetition=serieSansRepetition;} totalComparaisons++; if(tirageActuel.chance===tirageSuivant.chance)repetitionsChance++; totalChanceComparaisons++;} if(serieSansRepetition>0)series.push(serieSansRepetition); const tauxGlobal=(repetitions/totalComparaisons*100).toFixed(1); const tauxTheorique=38.7; const ecartTheorique=(tauxGlobal-tauxTheorique).toFixed(1); const tendance=ecartTheorique>2?'HAUTE':(ecartTheorique<-2?'BASSE':'NORMALE'); let sommeRepetitions=0; for(let i=0;i<draws.length-1;i++)sommeRepetitions+=draws[i].boules.filter(b=>draws[i+1].boules.includes(b)).length; const moyenneRepetitions=(sommeRepetitions/(draws.length-1)).toFixed(2); const topRepetitions=Object.entries(repetitionsParNumero).sort((a,b)=>b[1]-a[1]).slice(0,10); return{totalComparaisons,repetitions,tauxGlobal,tauxTheorique,ecartTheorique,tendance,moyenneRepetitions,distribution,repetitionsChance,tauxChance:(repetitionsChance/totalChanceComparaisons*100).toFixed(1),topRepetitions,maxSerieSansRepetition,series,derniereSerie:serieSansRepetition}; }
 function afficherAnalyseRepetitions() { const stats=analyserRepetitionsConsecutives(); if(!stats)return '<p style="color:var(--text3)">Pas assez de tirages pour analyser (minimum 2)</p>'; const couleurTendance=stats.tendance==='HAUTE'?'var(--red)':(stats.tendance==='BASSE'?'var(--green)':'var(--gold)'); const interpretation=stats.tendance==='HAUTE'?'🔥 Les numéros se répètent PLUS souvent que la normale. Favorisez les numéros du dernier tirage !':(stats.tendance==='BASSE'?'❄️ Les numéros se répètent MOINS souvent que la normale. Évitez les numéros du dernier tirage !':'📊 Les répétitions sont dans la norme statistique.'); return `<div style="display:grid;gap:1rem"><div style="background:var(--surface2);border-radius:16px;padding:1rem;text-align:center"><div style="font-size:11px;color:var(--text2);text-transform:uppercase">Taux de répétition</div><div style="font-size:36px;font-weight:700;color:${couleurTendance}">${stats.tauxGlobal}%</div><div style="font-size:12px;color:var(--text2)">Théorique: ${stats.tauxTheorique}% (écart: ${stats.ecartTheorique>0?'+':''}${stats.ecartTheorique}%)</div><div style="margin-top:8px;font-size:13px;color:var(--text);background:var(--surface);border-radius:8px;padding:6px;display:inline-block">${interpretation}</div></div><div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px"><div style="background:var(--surface2);border-radius:12px;padding:8px;text-align:center"><div style="font-size:10px;color:var(--text2)">Répétitions moy.</div><div style="font-size:20px;font-weight:700">${stats.moyenneRepetitions}</div><div style="font-size:10px;color:var(--text2)">par tirage</div></div><div style="background:var(--surface2);border-radius:12px;padding:8px;text-align:center"><div style="font-size:10px;color:var(--text2)">Max sans répét.</div><div style="font-size:20px;font-weight:700">${stats.maxSerieSansRepetition}</div><div style="font-size:10px;color:var(--text2)">tirages</div></div><div style="background:var(--surface2);border-radius:12px;padding:8px;text-align:center"><div style="font-size:10px;color:var(--text2)">Chance répété</div><div style="font-size:20px;font-weight:700">${stats.tauxChance}%</div><div style="font-size:10px;color:var(--text2)">(théo: 10%)</div></div></div><div style="background:var(--surface2);border-radius:12px;padding:1rem"><div style="font-size:12px;font-weight:600;margin-bottom:8px">Distribution du nombre de répétitions</div><div style="display:flex;gap:8px;justify-content:space-around">${[0,1,2,3,4,5].map(n=>`<div style="text-align:center"><div style="font-size:18px;font-weight:700">${stats.distribution[n]||0}</div><div style="font-size:10px;color:var(--text2)">${n} répét.</div></div>`).join('')}</div></div><div style="background:var(--surface2);border-radius:12px;padding:1rem"><div style="font-size:12px;font-weight:600;margin-bottom:8px">🎯 Numéros qui se répètent le plus souvent</div><div class="balls-row">${stats.topRepetitions.map(([num,count])=>`<div style="text-align:center"><div class="ball ${getDizaineColor(parseInt(num))} ball-sm">${num}</div><div style="font-size:9px;color:var(--text2)">${count}x</div></div>`).join('')}</div></div><div style="background:var(--surface2);border-radius:12px;padding:1rem"><div style="font-size:12px;font-weight:600;margin-bottom:4px">📈 Dernière série en cours</div><div style="font-size:24px;font-weight:700">${stats.derniereSerie}</div><div style="font-size:11px;color:var(--text2)">tirages consécutifs sans répétition</div>${stats.derniereSerie>=5?'<div style="margin-top:8px;font-size:11px;color:var(--red)">⚠️ Probabilité de répétition en hausse !</div>':''}</div></div>`; }
 function genererStrategieRepetition() { const stats=analyserRepetitionsConsecutives(); if(!stats){document.getElementById('strategieRepetition').innerHTML='<p>Pas assez de données</p>'; return;} const dernierTirage=draws[0]; const numerosDernierTirage=dernierTirage.boules; const chanceDernierTirage=dernierTirage.chance; let strategie='',conseilNumeros='',conseilChance=''; if(stats.tendance==='HAUTE'){strategie='📈 La tendance actuelle favorise les RÉPÉTITIONS.'; conseilNumeros=`✅ Sélectionnez 1 à 2 numéros du dernier tirage : ${numerosDernierTirage.join(', ')}`; conseilChance=`✅ Le numéro chance se répète dans ${stats.tauxChance}% des cas. Pensez à garder le même (${chanceDernierTirage})`;} else if(stats.tendance==='BASSE'){strategie='📉 La tendance actuelle ÉVITE les répétitions.'; conseilNumeros=`❌ Évitez les numéros du dernier tirage : ${numerosDernierTirage.join(', ')}`; conseilChance=`❌ Le numéro chance se répète moins souvent. Changez-le (actuel: ${chanceDernierTirage})`;}else{strategie='⚖️ La tendance est NEUTRE. Aucune influence particulière.'; conseilNumeros=`ℹ️ Le taux de répétition (${stats.tauxGlobal}%) est proche de la moyenne (${stats.tauxTheorique}%)`; conseilChance=`ℹ️ Le numéro chance se répète ${stats.tauxChance}% du temps (moyenne: 10%)`;} let alerteSerie=''; if(stats.derniereSerie>=5){alerteSerie=`<div style="margin-top:12px;padding:8px;background:rgba(255,82,82,0.15);border-radius:8px;border-left:3px solid var(--red)">⚠️ Série sans répétition : ${stats.derniereSerie} tirages<br>Historiquement, après ${stats.derniereSerie} tirages sans répétition, la probabilité augmente. ${stats.tendance!=='BASSE'?'Parier sur une répétition est statistiquement avantageux.' : ''}</div>`;} document.getElementById('strategieRepetition').innerHTML=`<div style="margin-bottom:12px"><span style="background:var(--surface);padding:4px 8px;border-radius:100px;font-size:11px">Basé sur ${stats.totalComparaisons} comparaisons</span></div><div style="font-size:14px;margin-bottom:12px">${strategie}</div><div style="font-size:13px;margin-bottom:8px">${conseilNumeros}</div><div style="font-size:13px;margin-bottom:8px">${conseilChance}</div>${alerteSerie}`; }
