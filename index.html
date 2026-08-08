@@ -250,6 +250,7 @@
 
     <div class="section" id="sec-second">
         <div class="card"><div class="period-select"><label>Période :</label><select id="secPeriod" onchange="updateSecondPeriod()"><option value="all">Tout</option><option value="1year">1 an</option><option value="6months">6 mois</option><option value="3months">3 mois</option></select></div></div>
+        <div class="card" style="margin-bottom:1rem;"><h3>Intégration aux statistiques</h3><div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;"><label style="display:flex;align-items:center;gap:8px;font-size:13px;color:var(--text2);"><input type="checkbox" id="includeSecondInStats" onchange="toggleSecondInStats()" checked> Inclure les seconds tirages dans les fréquences globales</label><span style="font-size:11px;color:var(--text3);">⚠️ Les seconds tirages ne concernent que certains tirages spéciaux</span></div></div>
         <div class="grid grid-2">
             <div class="card"><h3>Fréquences second tirage</h3><div class="chart-container"><canvas id="secondFreqChart"></canvas></div></div>
             <div class="card"><h3>Écarts second tirage</h3><div class="scroll-y" id="secondGaps"></div></div>
@@ -258,6 +259,7 @@
             <div class="card"><h3>Paires fréquentes</h3><div class="scroll-y" id="secondPairs"></div></div>
             <div class="card"><h3>Comparaison sommes</h3><div class="chart-container"><canvas id="secondSumChart"></canvas></div></div>
         </div>
+        <div class="card"><h3>Derniers tirages avec second tirage</h3><div class="scroll-y" id="secondRecentList"></div></div>
     </div>
 
     <div class="section" id="sec-comparaison">
@@ -696,6 +698,15 @@ function startApplication() {
         
         // Afficher un message de succès
         showToast(`${draws.length} tirages chargés avec succès !`);
+        
+        // Restaurer la préférence d'inclusion des seconds tirages
+        const savedIncludeSecond = localStorage.getItem('loto_include_second');
+        if (savedIncludeSecond !== null) {
+            includeSecondInStats = savedIncludeSecond === 'true';
+            const checkbox = document.getElementById('includeSecondInStats');
+            if (checkbox) checkbox.checked = includeSecondInStats;
+        }
+        
         showTab('dashboard');
     } catch(e) {
         alert('Erreur lors du chargement : ' + e.message);
@@ -1056,9 +1067,47 @@ function renderScores() { /* idem */ }
 function analyserRepetitionsConsecutives() { /* idem */ }
 function afficherAnalyseRepetitions() { /* idem */ }
 function genererStrategieRepetition() { /* idem */ }
+
+// Variable globale pour stocker la préférence d'inclusion des seconds tirages
+let includeSecondInStats = true;
+
+function toggleSecondInStats() {
+    includeSecondInStats = document.getElementById('includeSecondInStats').checked;
+    localStorage.setItem('loto_include_second', includeSecondInStats);
+    // Mettre à jour les statistiques principales si on est sur le dashboard ou fréquences
+    const activeTab = document.querySelector('.tab.active');
+    if (activeTab && (activeTab.textContent.includes('dashboard') || activeTab.textContent.includes('frequences'))) {
+        renderDashboard();
+        updateFreqPeriod();
+    }
+}
+
 function getSecondDrawsWithData() { return draws.filter(d => d.second_boules && d.second_boules.length === 5); }
+
 function updateSecondPeriod() { renderSecondTirage(document.getElementById('secPeriod').value); }
-function renderSecondTirage(period) { /* identique */ }
+
+function renderSecondTirage(period='all'){
+    const secDraws=period==='all'?getSecondDrawsWithData():getSecondDrawsWithData().filter(d=>{const months={'3months':3,'6months':6,'1year':12}[period];const limit=new Date();limit.setMonth(limit.getMonth()-months);return d.date>=limit;});
+    
+    // Afficher les derniers tirages avec second tirage
+    const recentSecDraws = secDraws.slice(0, 20).reverse();
+    document.getElementById('secondRecentList').innerHTML = recentSecDraws.map(d => `
+        <div class="tirage-row">
+            <span class="tirage-date">${formatDate(d.date)}</span>
+            <div class="balls-row">
+                ${d.boules.map(b => `<div class="ball ball-sm ball-main">${b}</div>`).join('')}
+                <span style="color:var(--text3)">+</span>
+                <div class="ball ball-chance ball-sm">${d.chance}</div>
+            </div>
+            <span style="font-size:10px;color:var(--text3);margin-left:8px;">→</span>
+            <div class="balls-row">
+                ${d.second_boules.map(b => `<div class="ball ball-sm" style="background:linear-gradient(135deg,#1a3a1a,#2a5a2a);border-color:var(--green);color:var(--green)">${b}</div>`).join('')}
+            </div>
+            ${d.special ? `<span class="cons-badge">${d.special}</span>` : ''}
+        </div>
+    `).join('') || '<p style="color:var(--text3);padding:1rem;">Aucun second tirage disponible</p>';
+    
+    const f={};for(let i=1;i<=49;i++)f[i]=0;secDraws.forEach(d=>d.second_boules.forEach(b=>f[b]++));const labels=Array.from({length:49},(_,i)=>i+1);const data=labels.map(n=>f[n]||0);const ctx=document.getElementById('secondFreqChart')?.getContext('2d');if(ctx){if(window.secondFreqChartInstance)window.secondFreqChartInstance.destroy();window.secondFreqChartInstance=new Chart(ctx,{type:'bar',data:{labels,datasets:[{label:'Second tirage',data,backgroundColor:'#3ecf8e'}]},options:{responsive:true,maintainAspectRatio:false,plugins:{zoom:{zoom:{wheel:{enabled:true},drag:{enabled:true}}}}}});}const gaps=[];for(let i=1;i<=49;i++)gaps.push({n:i,last:null});for(let idx=0;idx<draws.length;idx++){const d=draws[idx];if(d.second_boules&&d.second_boules.length){d.second_boules.forEach(b=>{if(gaps[b-1].last===null)gaps[b-1].last=idx;});}}gaps.sort((a,b)=>(b.last===null?-1:b.last)-(a.last===null?-1:a.last));document.getElementById('secondGaps').innerHTML='<table style="width:100%;font-size:13px;color:var(--text2)">'+gaps.map(g=>`<tr><td>Numéro ${g.n}</td><td>${g.last===null?'jamais sorti':'il y a '+g.last+' tirages'}</td></tr>`).join('')+'</table>';const pairsCount={};secDraws.forEach(d=>{for(let i=0;i<d.second_boules.length;i++)for(let j=i+1;j<d.second_boules.length;j++){const key=d.second_boules[i]+'-'+d.second_boules[j];pairsCount[key]=(pairsCount[key]||0)+1;}});const pairsSorted=Object.entries(pairsCount).sort((a,b)=>b[1]-a[1]).slice(0,15);document.getElementById('secondPairs').innerHTML=pairsSorted.map(([k,v])=>`<div>${k} : ${v} fois</div>`).join('');const recentDraws=secDraws.slice(0,100).reverse();const mainSums=recentDraws.map(d=>d.boules.reduce((a,b)=>a+b,0));const secondSums=recentDraws.map(d=>d.second_boules.reduce((a,b)=>a+b,0));const ctxSum=document.getElementById('secondSumChart')?.getContext('2d');if(ctxSum){if(window.secondSumChartInstance)window.secondSumChartInstance.destroy();window.secondSumChartInstance=new Chart(ctxSum,{type:'line',data:{labels:recentDraws.map(d=>formatDate(d.date)),datasets:[{label:'Principal',data:mainSums,borderColor:'#f4c430',borderWidth:1.5,tension:0.2,pointRadius:1},{label:'Secondaire',data:secondSums,borderColor:'#3ecf8e',borderWidth:1.5,tension:0.2,pointRadius:1}]},options:{responsive:true,maintainAspectRatio:false}});}}
 function comparerPeriodes() { /* identique */ }
 function renderHistorique() { /* identique */ }
 function resetHistorique() { /* identique */ }
