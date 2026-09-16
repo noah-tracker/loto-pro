@@ -109,6 +109,7 @@
     <div class="logo">&#9733;</div>
     <div><h1>Analyseur Loto Pro</h1><p id="headerDate">Chargement...</p></div>
     <div class="stats-pill"><strong id="nbTirages">—</strong> tirages</div>
+    <button class="btn btn-secondary" onclick="checkFDJUpdate()" id="btnFDJ" style="font-size:12px;padding:6px 12px;" title="Vérifier les derniers résultats FDJ">🔄 FDJ</button>
     <button class="btn btn-secondary" onclick="toggleTheme()" style="font-size:12px;padding:6px 12px;">☀️/🌙</button>
     <button class="btn btn-secondary" onclick="enableNotifications()" style="font-size:12px;padding:6px 12px;">🔔</button>
     <button class="btn btn-secondary" onclick="exportAnalyses()" style="font-size:12px;padding:6px 12px;">📥</button>
@@ -1337,7 +1338,166 @@ function exportAnalyses(){const scores=getScoreComposite();const f=getFreqsForDr
 async function sauvegarderCloud(){if(!firebaseReady||!firebaseDb){showToast('Firebase non configuré','error');return;}const data={userId,favoris,grillesHistory,userDraws,date:Date.now(),version:'1.0'};try{await firebaseDb.ref(`sauvegardes/${userId}`).set(data);showToast('✅ Données sauvegardées dans le cloud !','success');}catch(e){showToast('❌ Erreur de sauvegarde: '+e.message,'error');}}
 async function chargerCloud(){if(!firebaseReady||!firebaseDb){showToast('Firebase non configuré','error');return;}try{const snapshot=await firebaseDb.ref(`sauvegardes/${userId}`).once('value');const data=snapshot.val();if(data){if(data.favoris)favoris=data.favoris;if(data.grillesHistory)grillesHistory=data.grillesHistory;if(data.userDraws)userDraws=data.userDraws;localStorage.setItem('loto_favoris',JSON.stringify(favoris));localStorage.setItem('loto_grilles',JSON.stringify(grillesHistory));localStorage.setItem('loto_user_draws',JSON.stringify(userDraws));updateAllData();renderDashboard();renderHistory();showToast('✅ Données chargées depuis le cloud !','success');}else{showToast('Aucune sauvegarde trouvée','info');}}catch(e){showToast('❌ Erreur de chargement: '+e.message,'error');}}
 
-document.addEventListener('DOMContentLoaded', initApp);
+// ==================== MISE À JOUR AUTOMATIQUE FDJ ====================
+const FDJ_API_URL = 'https://www.sto.api.fdj.fr/anonymous/service-draw-info/v3/documentations/1a2b3c4d-9876-4562-b3fc-2c963f66afp6';
+const FDJ_PAGE_URL = 'https://www.fdj.fr/jeux-de-tirage/loto/historique';
+
+let lastCheckDate = localStorage.getItem('loto_last_fdj_check') || null;
+let fdjCSVText = localStorage.getItem('loto_fdj_csv') || null;
+
+function shouldCheckFDJ() {
+    const now = new Date();
+    const today = formatDate(now);
+    
+    // Vérifier si on a déjà vérifié aujourd'hui
+    if (lastCheckDate === today) {
+        return false;
+    }
+    
+    // Vérifier si c'est un jour de tirage (Lundi, Mercredi, Samedi)
+    const day = now.getDay();
+    const isDrawDay = (day === 1 || day === 3 || day === 6);
+    
+    // Vérifier si on est après minuit (00:00)
+    const hour = now.getHours();
+    const minutes = now.getMinutes();
+    
+    // On peut vérifier après 00:05 pour laisser le temps à la FDJ de publier
+    if (isDrawDay && (hour > 0 || minutes >= 5)) {
+        return true;
+    }
+    
+    // Permettre une vérification manuelle anytime
+    return false;
+}
+
+async function checkFDJUpdate() {
+    const btn = document.getElementById('btnFDJ');
+    if (btn) {
+        btn.disabled = true;
+        btn.textContent = '⏳ Chargement...';
+    }
+    
+    try {
+        showToast('🔍 Recherche des derniers résultats FDJ...', 'info');
+        
+        // Tenter de récupérer via l'API directe
+        let csvContent = null;
+        
+        try {
+            // Essai 1: API directe (peut être bloquée par CORS)
+            const response = await fetch(FDJ_API_URL, {
+                method: 'GET',
+                headers: {
+                    'Accept': 'text/csv,application/csv,text/plain',
+                },
+                mode: 'cors'
+            });
+            
+            if (response.ok) {
+                csvContent = await response.text();
+                console.log('✅ FDJ API directe réussie');
+            }
+        } catch (e) {
+            console.log('⚠️ API directe échouée (CORS probable):', e.message);
+        }
+        
+        if (!csvContent) {
+            // Essai 2: Proxy CORS (pour contourner les restrictions navigateur)
+            const proxyURLs = [
+                `https://api.allorigins.win/raw?url=${encodeURIComponent(FDJ_API_URL)}`,
+                `https://corsproxy.io/?${encodeURIComponent(FDJ_API_URL)}`,
+                `https://thingproxy.freeboard.io/fetch/${FDJ_API_URL}`
+            ];
+            
+            for (const proxyURL of proxyURLs) {
+                try {
+                    const response = await fetch(proxyURL);
+                    if (response.ok) {
+                        csvContent = await response.text();
+                        console.log('✅ FDJ via proxy réussi:', proxyURL);
+                        break;
+                    }
+                } catch (e) {
+                    console.log('⚠️ Proxy échoué:', proxyURL, e.message);
+                }
+            }
+        }
+        
+        if (!csvContent) {
+            // Essai 3: Rediriger vers la page FDJ pour téléchargement manuel
+            throw new Error('Impossible de récupérer automatiquement. Téléchargement manuel requis.');
+        }
+        
+        // Traiter le CSV récupéré
+        if (csvContent && csvContent.trim().length > 0) {
+            // Ajouter aux données existantes
+            csvTexts.push(csvContent);
+            localStorage.setItem('loto_csv_texts', JSON.stringify(csvTexts));
+            localStorage.setItem('loto_last_fdj_check', formatDate(new Date()));
+            localStorage.setItem('loto_fdj_csv', csvContent);
+            
+            // Recharger l'application avec les nouvelles données
+            startApplication();
+            
+            showToast('✅ Nouveaux résultats FDJ intégrés avec succès !', 'success');
+            
+            if (btn) {
+                btn.textContent = '✅ FDJ';
+                btn.style.borderColor = 'var(--green)';
+                btn.style.color = 'var(--green)';
+            }
+            
+            setTimeout(() => {
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = '🔄 FDJ';
+                    btn.style.borderColor = '';
+                    btn.style.color = '';
+                }
+            }, 3000);
+        }
+        
+    } catch (error) {
+        console.error('Erreur vérification FDJ:', error);
+        
+        // Proposer le téléchargement manuel
+        const confirmManual = confirm(
+            '⚠️ Récupération automatique impossible (limitations CORS).\n\n' +
+            'Souhaitez-vous ouvrir la page FDJ pour télécharger manuellement le fichier CSV ?\n\n' +
+            'Une fois téléchargé, placez-le dans le même dossier que index.html et rechargez la page.'
+        );
+        
+        if (confirmManual) {
+            window.open(FDJ_PAGE_URL, '_blank');
+        }
+        
+        if (btn) {
+            btn.disabled = false;
+            btn.textContent = '🔄 FDJ';
+        }
+        
+        showToast('❌ Échec récupération FDJ: ' + error.message, 'error');
+    }
+}
+
+// Vérification automatique au chargement de l'application
+async function autoCheckFDJ() {
+    if (shouldCheckFDJ()) {
+        console.log('🔄 Vérification automatique FDJ activée...');
+        try {
+            await checkFDJUpdate();
+        } catch (e) {
+            console.log('⚠️ Vérification auto FDJ échouée:', e.message);
+        }
+    }
+}
+
+document.addEventListener('DOMContentLoaded', () => {
+    initApp();
+    // Vérifier automatiquement les nouveaux résultats après le chargement initial
+    setTimeout(autoCheckFDJ, 2000);
+});
 </script>
 <script>
 if ('serviceWorker' in navigator) {
