@@ -7,6 +7,9 @@
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.0/dist/chart.umd.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-zoom@2.0.1/dist/chartjs-plugin-zoom.min.js"></script>
     
+    <!-- JSZip pour décompresser les fichiers ZIP de la FDJ -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+    
     <!-- Firebase SDKs -->
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-app-compat.js"></script>
     <script src="https://www.gstatic.com/firebasejs/10.7.1/firebase-database-compat.js"></script>
@@ -1382,126 +1385,145 @@ async function checkFDJUpdate() {
     try {
         showToast('🔍 Recherche des derniers résultats FDJ...', 'info');
         
-        // Stratégie 1: Télécharger le CSV directement depuis FDJ
-        let csvContent = null;
-        
-        // Liste des URLs potentielles pour le CSV FDJ
-        const fdjUrls = [
-            'https://www.fdj.fr/export/loto.csv',
-            'https://fdj.fr/export/loto.csv',
-            'https://www.sto.api.fdj.fr/api/draws/loto/latest.csv',
-            'https://api.fdj.fr/loto/results.csv'
-        ];
+        // URL officielle du fichier ZIP FDJ contenant le CSV
+        const fdjZipUrl = 'https://www.sto.api.fdj.fr/anonymous/service-draw-info/v3/documentations/1a2b3c4d-9876-4562-b3fc-2c963f66afp6';
         
         // Proxy pour contourner CORS
         const proxyServices = [
             url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
             url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
-            url => `https://thingproxy.freeboard.io/fetch/${url}`,
-            url => `https://cors-anywhere.herokuapp.com/${url}`
+            url => `https://thingproxy.freeboard.io/fetch/${url}`
         ];
         
-        // Essayer chaque combinaison URL + proxy
-        for (const baseUrl of fdjUrls) {
-            if (csvContent) break;
-            
-            for (const proxyFn of proxyServices) {
-                try {
-                    const proxyUrl = proxyFn(baseUrl);
-                    const response = await fetch(proxyUrl, {
-                        method: 'GET',
-                        headers: {
-                            'Accept': 'text/csv,application/csv,text/plain',
-                        }
-                    });
-                    
-                    if (response.ok && response.status === 200) {
-                        const text = await response.text();
-                        // Vérifier que c'est un CSV valide avec des données
-                        if (text.includes(';') && text.split('\n').length > 2) {
-                            csvContent = text;
-                            console.log('✅ FDJ récupéré via:', proxyUrl);
-                            break;
-                        }
+        let zipContent = null;
+        
+        // Essayer de télécharger le fichier ZIP via les proxys
+        for (const proxyFn of proxyServices) {
+            try {
+                const proxyUrl = proxyFn(fdjZipUrl);
+                console.log('📡 Tentative avec:', proxyUrl);
+                
+                const response = await fetch(proxyUrl, {
+                    method: 'GET',
+                    headers: {
+                        'Accept': 'application/zip,application/octet-stream,*/*',
                     }
-                } catch (e) {
-                    console.log('⚠️ Échec proxy:', proxyFn(baseUrl), e.message);
+                });
+                
+                if (response.ok && response.status === 200) {
+                    const arrayBuffer = await response.arrayBuffer();
+                    // Vérifier que c'est un fichier ZIP valide (signature PK)
+                    const view = new Uint8Array(arrayBuffer.slice(0, 4));
+                    if (view[0] === 0x50 && view[1] === 0x4b && view[2] === 0x03 && view[3] === 0x04) {
+                        zipContent = arrayBuffer;
+                        console.log('✅ ZIP FDJ récupéré via:', proxyUrl);
+                        break;
+                    }
                 }
+            } catch (e) {
+                console.log('⚠️ Échec proxy:', proxyFn(fdjZipUrl), e.message);
             }
         }
         
-        if (!csvContent) {
-            throw new Error('Impossible de récupérer automatiquement les données FDJ (CORS ou URL invalide).');
+        if (!zipContent) {
+            throw new Error('Impossible de récupérer le fichier ZIP FDJ. Vérifiez l\'URL ou essayez manuellement.');
         }
+        
+        // Décompresser le fichier ZIP avec JSZip
+        const zip = await JSZip.loadAsync(zipContent);
+        
+        // Trouver le fichier CSV dans le ZIP
+        let csvFile = null;
+        let csvFileName = '';
+        
+        zip.forEach((relativePath, file) => {
+            if (file.name.toLowerCase().endsWith('.csv') && !file.name.startsWith('__MACOSX')) {
+                csvFile = file;
+                csvFileName = file.name;
+            }
+        });
+        
+        if (!csvFile) {
+            throw new Error('Aucun fichier CSV trouvé dans le ZIP FDJ.');
+        }
+        
+        console.log('📄 Fichier CSV trouvé:', csvFileName);
+        
+        // Extraire le contenu CSV
+        const csvContent = await csvFile.async('string');
+        
+        if (!csvContent || csvContent.trim().length === 0) {
+            throw new Error('Le fichier CSV est vide ou invalide.');
+        }
+        
+        console.log('✅ CSV extrait, taille:', csvContent.length, 'caractères');
         
         // Traiter le CSV récupéré
-        if (csvContent && csvContent.trim().length > 0) {
-            // Parser le nouveau CSV pour extraire les nouveaux tirages
-            const newRawData = parseCSV(csvContent);
-            const newDraws = buildDraws(newRawData);
-            
-            console.log(`Nouveaux tirages détectés: ${newDraws.length}`);
-            
-            // Filtrer uniquement les tirages qui ne sont pas déjà dans notre base
-            const existingDates = new Set(draws.map(d => formatDate(d.date)));
-            const trulyNewDraws = newDraws.filter(d => !existingDates.has(formatDate(d.date)));
-            
-            if (trulyNewDraws.length === 0) {
-                showToast('ℹ️ Vos données sont déjà à jour !', 'info');
-                if (btn) {
-                    btn.disabled = false;
-                    btn.textContent = '🔄 FDJ';
-                }
-                return;
-            }
-            
-            console.log(`Tirages réellement nouveaux: ${trulyNewDraws.length}`);
-            
-            // Ajouter les nouveaux tirages à la base existante
-            draws = [...draws, ...trulyNewDraws].sort((a,b) => b.date - a.date);
-            
-            // Sauvegarder dans localStorage
-            const allCsvTexts = [...csvTexts, csvContent];
-            localStorage.setItem('loto_csv_texts', JSON.stringify(allCsvTexts));
-            localStorage.setItem('loto_last_fdj_check', formatDate(new Date()));
-            localStorage.setItem('loto_fdj_csv', csvContent);
-            
-            // Mettre à jour l'affichage
-            updateAllData();
-            renderDashboard();
-            renderFrequences();
-            renderHistory();
-            
-            showToast(`✅ ${trulyNewDraws.length} nouveau(x) tirage(s) intégré(s) !`, 'success');
-            
+        const newRawData = parseCSV(csvContent);
+        const newDraws = buildDraws(newRawData);
+        
+        console.log(`Nouveaux tirages détectés: ${newDraws.length}`);
+        
+        // Filtrer uniquement les tirages qui ne sont pas déjà dans notre base
+        const existingDates = new Set(draws.map(d => formatDate(d.date)));
+        const trulyNewDraws = newDraws.filter(d => !existingDates.has(formatDate(d.date)));
+        
+        if (trulyNewDraws.length === 0) {
+            showToast('ℹ️ Vos données sont déjà à jour !', 'info');
             if (btn) {
-                btn.textContent = '✅ FDJ';
-                btn.style.borderColor = 'var(--green)';
-                btn.style.color = 'var(--green)';
+                btn.disabled = false;
+                btn.textContent = '🔄 FDJ';
             }
-            
-            setTimeout(() => {
-                if (btn) {
-                    btn.disabled = false;
-                    btn.textContent = '🔄 FDJ';
-                    btn.style.borderColor = '';
-                    btn.style.color = '';
-                }
-            }, 3000);
+            return;
         }
+        
+        console.log(`Tirages réellement nouveaux: ${trulyNewDraws.length}`);
+        console.log('Dernier tirage ajouté:', formatDate(trulyNewDraws[0]?.date));
+        
+        // Ajouter les nouveaux tirages à la base existante
+        draws = [...draws, ...trulyNewDraws].sort((a,b) => b.date - a.date);
+        
+        // Sauvegarder dans localStorage
+        const allCsvTexts = [...csvTexts, csvContent];
+        localStorage.setItem('loto_csv_texts', JSON.stringify(allCsvTexts));
+        localStorage.setItem('loto_last_fdj_check', formatDate(new Date()));
+        localStorage.setItem('loto_fdj_csv', csvContent);
+        localStorage.setItem('loto_fdj_zip_downloaded', 'true');
+        
+        // Mettre à jour l'affichage
+        updateAllData();
+        renderDashboard();
+        renderFrequences();
+        renderHistory();
+        
+        showToast(`✅ ${trulyNewDraws.length} nouveau(x) tirage(s) intégré(s) !`, 'success');
+        
+        if (btn) {
+            btn.textContent = '✅ FDJ';
+            btn.style.borderColor = 'var(--green)';
+            btn.style.color = 'var(--green)';
+        }
+        
+        setTimeout(() => {
+            if (btn) {
+                btn.disabled = false;
+                btn.textContent = '🔄 FDJ';
+                btn.style.borderColor = '';
+                btn.style.color = '';
+            }
+        }, 3000);
         
     } catch (error) {
         console.error('Erreur vérification FDJ:', error);
         
-        // Proposer le téléchargement manuel
         const confirmManual = confirm(
-            '⚠️ Récupération automatique impossible (limitations CORS).\n\n' +
-            'Voulez-vous ouvrir la page FDJ pour télécharger manuellement le fichier CSV ?\n\n' +
+            '⚠️ Récupération automatique impossible (limitations CORS ou URL invalide).\n\n' +
+            'Voulez-vous ouvrir la page FDJ pour télécharger manuellement le fichier ZIP ?\n\n' +
             'Instructions :\n' +
             '1. Cliquez sur "OK" pour ouvrir le site FDJ\n' +
-            '2. Téléchargez le fichier CSV des résultats\n' +
-            '3. Placez-le dans le même dossier que index.html\n' +
-            '4. Rechargez cette page (F5)'
+            '2. Téléchargez le fichier ZIP des résultats\n' +
+            '3. Importez-le via le bouton "Importer CSV" en bas de page\n' +
+            '4. L\'application détectera automatiquement le format'
         );
         
         if (confirmManual) {
