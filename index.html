@@ -1245,7 +1245,8 @@ async function sauvegarderCloud(){if(!firebaseReady||!firebaseDb){showToast('Fir
 async function chargerCloud(){if(!firebaseReady||!firebaseDb){showToast('Firebase non configuré','error');return;}try{const snapshot=await firebaseDb.ref(`sauvegardes/${userId}`).once('value');const data=snapshot.val();if(data){if(data.favoris)favoris=data.favoris;if(data.grillesHistory)grillesHistory=data.grillesHistory;if(data.userDraws)userDraws=data.userDraws;localStorage.setItem('loto_favoris',JSON.stringify(favoris));localStorage.setItem('loto_grilles',JSON.stringify(grillesHistory));localStorage.setItem('loto_user_draws',JSON.stringify(userDraws));updateAllData();renderDashboard();renderHistory();showToast('✅ Données chargées depuis le cloud !','success');}else{showToast('Aucune sauvegarde trouvée','info');}}catch(e){showToast('❌ Erreur de chargement: '+e.message,'error');}}
 
 // ==================== MISE À JOUR AUTOMATIQUE FDJ ====================
-const FDJ_API_URL = 'https://www.sto.api.fdj.fr/anonymous/service-draw-info/v3/documentations/1a2b3c4d-9876-4562-b3fc-2c963f66afp6';
+// URL officielle du téléchargement CSV FDJ (lien direct vers le fichier)
+const FDJ_CSV_URL = 'https://www.fdj.fr/export/loto.csv';
 const FDJ_PAGE_URL = 'https://www.fdj.fr/jeux-de-tirage/loto/historique';
 
 let lastCheckDate = localStorage.getItem('loto_last_fdj_check') || null;
@@ -1274,7 +1275,7 @@ function shouldCheckFDJ() {
     }
     
     // Permettre une vérification manuelle anytime
-    return false;
+    return true; // Toujours permettre la vérification manuelle
 }
 
 async function checkFDJUpdate() {
@@ -1287,66 +1288,97 @@ async function checkFDJUpdate() {
     try {
         showToast('🔍 Recherche des derniers résultats FDJ...', 'info');
         
-        // Tenter de récupérer via l'API directe
+        // Stratégie 1: Télécharger le CSV directement depuis FDJ
         let csvContent = null;
         
-        try {
-            // Essai 1: API directe (peut être bloquée par CORS)
-            const response = await fetch(FDJ_API_URL, {
-                method: 'GET',
-                headers: {
-                    'Accept': 'text/csv,application/csv,text/plain',
-                },
-                mode: 'cors'
-            });
-            
-            if (response.ok) {
-                csvContent = await response.text();
-                console.log('✅ FDJ API directe réussie');
-            }
-        } catch (e) {
-            console.log('⚠️ API directe échouée (CORS probable):', e.message);
-        }
+        // Liste des URLs potentielles pour le CSV FDJ
+        const fdjUrls = [
+            'https://www.fdj.fr/export/loto.csv',
+            'https://fdj.fr/export/loto.csv',
+            'https://www.sto.api.fdj.fr/api/draws/loto/latest.csv',
+            'https://api.fdj.fr/loto/results.csv'
+        ];
         
-        if (!csvContent) {
-            // Essai 2: Proxy CORS (pour contourner les restrictions navigateur)
-            const proxyURLs = [
-                `https://api.allorigins.win/raw?url=${encodeURIComponent(FDJ_API_URL)}`,
-                `https://corsproxy.io/?${encodeURIComponent(FDJ_API_URL)}`,
-                `https://thingproxy.freeboard.io/fetch/${FDJ_API_URL}`
-            ];
+        // Proxy pour contourner CORS
+        const proxyServices = [
+            url => `https://api.allorigins.win/raw?url=${encodeURIComponent(url)}`,
+            url => `https://corsproxy.io/?${encodeURIComponent(url)}`,
+            url => `https://thingproxy.freeboard.io/fetch/${url}`,
+            url => `https://cors-anywhere.herokuapp.com/${url}`
+        ];
+        
+        // Essayer chaque combinaison URL + proxy
+        for (const baseUrl of fdjUrls) {
+            if (csvContent) break;
             
-            for (const proxyURL of proxyURLs) {
+            for (const proxyFn of proxyServices) {
                 try {
-                    const response = await fetch(proxyURL);
-                    if (response.ok) {
-                        csvContent = await response.text();
-                        console.log('✅ FDJ via proxy réussi:', proxyURL);
-                        break;
+                    const proxyUrl = proxyFn(baseUrl);
+                    const response = await fetch(proxyUrl, {
+                        method: 'GET',
+                        headers: {
+                            'Accept': 'text/csv,application/csv,text/plain',
+                        }
+                    });
+                    
+                    if (response.ok && response.status === 200) {
+                        const text = await response.text();
+                        // Vérifier que c'est un CSV valide avec des données
+                        if (text.includes(';') && text.split('\n').length > 2) {
+                            csvContent = text;
+                            console.log('✅ FDJ récupéré via:', proxyUrl);
+                            break;
+                        }
                     }
                 } catch (e) {
-                    console.log('⚠️ Proxy échoué:', proxyURL, e.message);
+                    console.log('⚠️ Échec proxy:', proxyFn(baseUrl), e.message);
                 }
             }
         }
         
         if (!csvContent) {
-            // Essai 3: Rediriger vers la page FDJ pour téléchargement manuel
-            throw new Error('Impossible de récupérer automatiquement. Téléchargement manuel requis.');
+            throw new Error('Impossible de récupérer automatiquement les données FDJ (CORS ou URL invalide).');
         }
         
         // Traiter le CSV récupéré
         if (csvContent && csvContent.trim().length > 0) {
-            // Ajouter aux données existantes
-            csvTexts.push(csvContent);
-            localStorage.setItem('loto_csv_texts', JSON.stringify(csvTexts));
+            // Parser le nouveau CSV pour extraire les nouveaux tirages
+            const newRawData = parseCSV(csvContent);
+            const newDraws = buildDraws(newRawData);
+            
+            console.log(`Nouveaux tirages détectés: ${newDraws.length}`);
+            
+            // Filtrer uniquement les tirages qui ne sont pas déjà dans notre base
+            const existingDates = new Set(draws.map(d => formatDate(d.date)));
+            const trulyNewDraws = newDraws.filter(d => !existingDates.has(formatDate(d.date)));
+            
+            if (trulyNewDraws.length === 0) {
+                showToast('ℹ️ Vos données sont déjà à jour !', 'info');
+                if (btn) {
+                    btn.disabled = false;
+                    btn.textContent = '🔄 FDJ';
+                }
+                return;
+            }
+            
+            console.log(`Tirages réellement nouveaux: ${trulyNewDraws.length}`);
+            
+            // Ajouter les nouveaux tirages à la base existante
+            draws = [...draws, ...trulyNewDraws].sort((a,b) => b.date - a.date);
+            
+            // Sauvegarder dans localStorage
+            const allCsvTexts = [...csvTexts, csvContent];
+            localStorage.setItem('loto_csv_texts', JSON.stringify(allCsvTexts));
             localStorage.setItem('loto_last_fdj_check', formatDate(new Date()));
             localStorage.setItem('loto_fdj_csv', csvContent);
             
-            // Recharger l'application avec les nouvelles données
-            startApplication();
+            // Mettre à jour l'affichage
+            updateAllData();
+            renderDashboard();
+            renderFrequences();
+            renderHistory();
             
-            showToast('✅ Nouveaux résultats FDJ intégrés avec succès !', 'success');
+            showToast(`✅ ${trulyNewDraws.length} nouveau(x) tirage(s) intégré(s) !`, 'success');
             
             if (btn) {
                 btn.textContent = '✅ FDJ';
@@ -1370,8 +1402,12 @@ async function checkFDJUpdate() {
         // Proposer le téléchargement manuel
         const confirmManual = confirm(
             '⚠️ Récupération automatique impossible (limitations CORS).\n\n' +
-            'Souhaitez-vous ouvrir la page FDJ pour télécharger manuellement le fichier CSV ?\n\n' +
-            'Une fois téléchargé, placez-le dans le même dossier que index.html et rechargez la page.'
+            'Voulez-vous ouvrir la page FDJ pour télécharger manuellement le fichier CSV ?\n\n' +
+            'Instructions :\n' +
+            '1. Cliquez sur "OK" pour ouvrir le site FDJ\n' +
+            '2. Téléchargez le fichier CSV des résultats\n' +
+            '3. Placez-le dans le même dossier que index.html\n' +
+            '4. Rechargez cette page (F5)'
         );
         
         if (confirmManual) {
